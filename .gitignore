@@ -1,0 +1,13 @@
+# Secrets — NEVER commit (public repo). env.example stays tracked.
+deploy/.env
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# macOS
+.DS_Store

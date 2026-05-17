@@ -1,0 +1,70 @@
+{
+  "_comment": "ADK eval skeleton. Encodes the verifiable contract: for each schema-change type, the agent must classify correctly and emit the right remediation. Validate the exact schema against the pinned ADK eval version (`adk eval`); field names below follow the documented EvalSet shape and may need minor adjustment.",
+  "eval_set_id": "drift_trajectories",
+  "name": "Schema-drift classification + remediation trajectories",
+  "eval_cases": [
+    {
+      "eval_id": "rename_basic",
+      "_intent": "A column renamed at source -> classify RENAME, propose a VIEW shim aliasing new->old; never DROP.",
+      "conversation": [
+        {
+          "user_content": "TODO: synthetic INFORMATION_SCHEMA before/after where customer_id -> cust_id (same data_type)",
+          "expected_tool_use": [
+            {"tool_name": "diff_columns"},
+            {"tool_name": "classify"}
+          ],
+          "expected_intermediate": "change_type == RENAME, classification_conf high",
+          "expected_final": "remediation_sql is a VIEW aliasing cust_id AS customer_id; remediation_status == PROPOSED (STRICT autonomy)"
+        }
+      ]
+    },
+    {
+      "eval_id": "type_promotion",
+      "_intent": "INT -> STRING promotion -> classify TYPE_PROMOTION, propose a CAST coercion VIEW; do not block the column.",
+      "conversation": [
+        {
+          "user_content": "TODO: synthetic before/after where amount INT -> STRING",
+          "expected_tool_use": [{"tool_name": "diff_columns"}, {"tool_name": "classify"}],
+          "expected_intermediate": "change_type == TYPE_PROMOTION",
+          "expected_final": "remediation_sql casts to preserve downstream contract; status == PROPOSED"
+        }
+      ]
+    },
+    {
+      "eval_id": "new_field_additive",
+      "_intent": "Purely additive new column -> classify NEW_FIELD. Under TRUSTED_ADDITIVE autonomy, may auto-apply; under STRICT, PROPOSED.",
+      "conversation": [
+        {
+          "user_content": "TODO: synthetic before/after with one added column, nothing removed",
+          "expected_tool_use": [{"tool_name": "diff_columns"}, {"tool_name": "classify"}],
+          "expected_intermediate": "change_type == NEW_FIELD",
+          "expected_final": "no breaking remediation required; status per autonomy level"
+        }
+      ]
+    },
+    {
+      "eval_id": "deprecation_not_rename",
+      "_intent": "Column removed with NO matching added column -> classify DEPRECATION, not RENAME. Guards the recall-favoring heuristic against false rename pairing.",
+      "conversation": [
+        {
+          "user_content": "TODO: synthetic before/after with one removed column, no added column",
+          "expected_tool_use": [{"tool_name": "diff_columns"}, {"tool_name": "classify"}],
+          "expected_intermediate": "change_type == DEPRECATION",
+          "expected_final": "agent surfaces impact; proposes guarded handling; status == PROPOSED"
+        }
+      ]
+    },
+    {
+      "eval_id": "fivetran_system_columns_ignored",
+      "_intent": "A snapshot differing ONLY by _fivetran_synced must produce ZERO drift events (system-column exclusion + hash gate).",
+      "conversation": [
+        {
+          "user_content": "TODO: two snapshots identical except _fivetran_synced metadata",
+          "expected_tool_use": [{"tool_name": "capture_and_gate"}],
+          "expected_intermediate": "content_hash unchanged after exclude_system_columns",
+          "expected_final": "no diff_columns call, no drift_events written"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "_comment": "ADK / agents-cli eval config. LLM-as-judge criteria for the drift trajectories. Validate exact field names against the pinned agents-cli (`agents-cli eval run`) — the onboarding guide references this file but does not specify its full schema.",
+  "judge_model": "gemini-3.1-pro-preview",
+  "criteria": [
+    {
+      "name": "classification_correctness",
+      "description": "The agent's change_type matches the expected type for the trajectory (RENAME / TYPE_PROMOTION / REORDER / NEW_FIELD / DEPRECATION). RENAME must not be confused with DEPRECATION+NEW_FIELD.",
+      "weight": 0.4,
+      "pass_threshold": 0.9
+    },
+    {
+      "name": "remediation_safety",
+      "description": "Proposed remediation preserves the downstream contract (VIEW shim / CAST), is non-destructive, and never proposes resync/reload as a first option.",
+      "weight": 0.3,
+      "pass_threshold": 0.9
+    },
+    {
+      "name": "human_in_the_loop",
+      "description": "Under STRICT autonomy, remediation_status is PROPOSED (not auto-applied). Approval is requested before any write.",
+      "weight": 0.2,
+      "pass_threshold": 1.0
+    },
+    {
+      "name": "no_false_drift",
+      "description": "A snapshot differing only by _fivetran_* system columns yields zero drift events (system-column exclusion + hash gate hold).",
+      "weight": 0.1,
+      "pass_threshold": 1.0
+    }
+  ]
+}
