@@ -15,33 +15,35 @@ See `../fivetranAgentDesign.md` for the full design rationale.
 
 ## Layout
 
-```
-agent/                  ADK agent + Gemini tools
-  __init__.py            ADK entrypoint discovery (from . import agent)
-  agent.py               Agent (LlmAgent) + Sequential workflow + MCPToolset
-  system_instructions.md loaded as the agent `instruction` string
-  requirements.txt       google-adk 1.x (>=1.15,<2) + bigquery
-  tools/
-    __init__.py
-    bigquery_query.py    FunctionTools: INFORMATION_SCHEMA + state-store
-    snapshot_diff.py     capture, hash-gate, column diff, rename heuristic
-    classify_drift.py    Gemini classification + remediation SQL
-tests/eval/              sanctioned ADK eval location
-  evalsets/
-    drift_trajectories.evalset.json
-  eval_config.json       LLM-as-judge criteria
-ingest/
-  webhook_receiver/      Cloud Run: receives Fivetran sync_end
-state/ddl/               BigQuery DDL for the 3 state tables
-scripts/                 Fivetran key/tier verification probes
-deploy/                  cloudbuild + env template
-```
+Canonical `agents-cli create --prototype --adk` structure with our assets
+ported in. `[gen]` = template-generated, `[port]` = ours, `[infra]` = our
+non-template infrastructure.
 
-> **Layout note:** this tree is a *staging area*. The deployment container is
-> regenerated via `agents-cli create --prototype` on the live environment
-> (per the onboarding guide); portable assets (DDL, `snapshot_diff` logic,
-> MCP tool-filter, eval trajectories, instructions) port into it. See design
-> doc "Onboarding-Guide Alignment".
+```
+pyproject.toml            [gen] deps (google-adk 1.x + bigquery) + [tool.agents-cli]
+uv.lock                   [gen] committed for reproducibility
+deployment_metadata.json  [gen] deploy target = agent_runtime
+CLAUDE.md                 [gen] coding-agent guidance
+app/
+  __init__.py             [gen] exports `app`
+  agent.py                [port] root_agent + App; composition contract
+  agent_runtime_app.py    [gen] Agent Runtime entrypoint
+  system_instructions.md  [port] loaded as instruction=
+  app_utils/              [gen] telemetry.py, typing.py
+  tools/                  [port] bigquery_query / snapshot_diff / classify_drift
+tests/
+  eval/eval_config.json           [port] LLM-as-judge criteria
+  eval/evalsets/
+    drift_trajectories.evalset.json [port]
+    basic.evalset.json            [gen] template default (reference)
+    README.md                     [gen] eval schema reference
+  integration/, unit/             [gen]
+ingest/webhook_receiver/  [infra] separate Cloud Run sync_end receiver
+state/ddl/                [infra] BigQuery DDL for the 3 state tables
+scripts/                  [infra] Fivetran key/tier verification probes
+deploy/env.example        [infra] env var template (Fivetran/BQ)
+docs/                     [infra] placeholder for summarized rationale
+```
 
 ## Data Flow
 
@@ -59,22 +61,23 @@ Fivetran sync_end (HMAC-signed)
 
 ## Setup (skeleton — not yet runnable)
 
-1. `cp deploy/env.example deploy/.env` and fill credentials
+1. `cp deploy/env.example deploy/.env` and fill credentials (`.env` is gitignored)
 2. Verify the Fivetran key + tier:
    - `bash scripts/check_api_access.sh` — READ auth + reversible WRITE-role probe
-   - `bash scripts/check_capabilities.sh` — Transformations API availability (read-only) + connection/destination inventory
-3. Apply DDL: `bq query --use_legacy_sql=false < state/ddl/*.sql`
-4. `pip install -r agent/requirements.txt` (pin the ADK version)
-5. Regenerate the deploy container: `agents-cli create --prototype`; port
-   assets from this staging tree into it
-6. Deploy receiver: `gcloud builds submit --config deploy/cloudbuild.yaml`
-7. `agents-cli deploy` the agent to Cloud Run / Agent Runtime
-8. Register the `sync_end` webhook via the Fivetran MCP
-9. `agents-cli eval run` against `tests/eval/evalsets/drift_trajectories.evalset.json`
+   - `bash scripts/check_capabilities.sh` — Transformations API availability + inventory
+3. `agents-cli install` then `uv run pytest tests/unit tests/integration` (sanity)
+4. Apply DDL: `bq query --use_legacy_sql=false < state/ddl/*.sql`
+5. Implement tool bodies in `app/tools/*`; assemble the workflow in `app/agent.py`
+6. `agents-cli playground` for interactive local testing
+7. `agents-cli eval run` against `tests/eval/evalsets/drift_trajectories.evalset.json`
+8. Deploy the `ingest/webhook_receiver` Cloud Run service separately; register
+   the `sync_end` webhook via the Fivetran MCP
+9. `agents-cli deploy` (after explicit approval — see CLAUDE.md)
 
 ## Status
 
-Skeleton only. Tool bodies are `NotImplementedError` stubs; `agent.py`
-composition is commented contract. DDL is complete; `exclude_system_columns`
-is implemented. Framework: ADK (code-first). Five design decisions resolved —
-see design doc "Resolved Decisions".
+Migrated to the canonical `agents-cli` (ADK 1.x) layout. Tool bodies are
+`NotImplementedError` stubs; `app/agent.py` is a composition contract
+(`root_agent` temporarily = classifier so `agents-cli playground` runs).
+DDL complete; `exclude_system_columns` implemented. Design decisions resolved —
+see `../fivetranAgentDesign.md` "Resolved Decisions".

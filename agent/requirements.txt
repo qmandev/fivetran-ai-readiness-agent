@@ -1,8 +1,0 @@
-# ADK 1.x — match the agents-cli sanctioned template pin. The platform
-# toolchain deliberately uses stable 1.x, NOT the 2.0 Beta that adk.dev
-# advertises. 2.0-only features (graph workflows, Human-input nodes) are
-# out of scope; human-in-the-loop uses 1.x Action confirmations.
-# (Authoritative deps live in the agents-cli-generated pyproject.toml; this
-#  file is for the staging tree only.)
-google-adk>=1.15.0,<2.0.0
-google-cloud-bigquery>=3.0
