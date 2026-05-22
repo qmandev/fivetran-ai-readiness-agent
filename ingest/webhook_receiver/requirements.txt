@@ -1,2 +1,20 @@
+# Receiver-only dependency list.
+#
+# The receiver's dispatch() imports `from app.tools import ...` which
+# transitively loads app/__init__.py -> app/agent.py, pulling in google-adk
+# + google-genai. So the receiver's deployed image needs the same deps as
+# the agent.
+#
+# RECOMMENDED: deploy the receiver from the project root with
+#   gcloud run deploy ... --source=. --entry-point=handle_request \
+#       --set-env-vars=FUNCTION_TARGET=handle_request
+# That uses pyproject.toml as the single source of dependency truth and
+# includes app/ in the deployed image (without which `from app.tools ...`
+# would fail at runtime).
+#
+# This requirements.txt is kept as a fallback for `--source=ingest/webhook_receiver`
+# deploys, but must stay in sync with pyproject.toml manually.
 functions-framework>=3.0
+google-adk>=1.15.0,<2.0.0
 google-cloud-bigquery>=3.0
+google-cloud-aiplatform[evaluation,agent-engines]>=1.130.0
