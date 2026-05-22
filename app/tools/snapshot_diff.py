@@ -17,13 +17,21 @@ from .bigquery_query import ColumnRecord
 # for prompt context only; it does NOT filter candidates out.
 RENAME_ORDINAL_TOLERANCE = None  # advisory-only; not a cutoff
 
-# Fivetran injects these system columns into every destination table
-# (_fivetran_synced, _fivetran_id, _fivetran_deleted). They appear in
-# BigQuery INFORMATION_SCHEMA but are NOT source schema drift. Every column
-# list MUST be passed through exclude_system_columns() before hashing or
-# diffing, or _fivetran_synced (which updates each sync) makes the content
-# hash change on every sync and floods drift_events with noise.
+# Fivetran-injected system columns observed in BigQuery for the Google Cloud
+# PostgreSQL connector (verified live, 2026-05-20):
+#   _fivetran_synced   TIMESTAMP — changes every sync; breaks the hash gate if not filtered
+#   _fivetran_deleted  BOOL      — Soft delete mode marker
+#   ctid_fivetran_id   STRING    — combined ctid + row-hash tracking. NOTE: this
+#                                  connector ships `ctid_fivetran_id` (NOT the
+#                                  docs-documented `_fivetran_id`), so a
+#                                  prefix-only check misses it.
+#
+# Rule: a column is a Fivetran system column iff it STARTS with `_fivetran_`
+# OR ENDS with `_fivetran_id`. The suffix branch catches `ctid_fivetran_id`
+# while staying defensive against unrelated source columns that merely
+# contain "fivetran" elsewhere in the name.
 FIVETRAN_SYSTEM_PREFIX = "_fivetran_"
+FIVETRAN_SYSTEM_ID_SUFFIX = "_fivetran_id"
 
 
 def exclude_system_columns(columns: list[ColumnRecord]) -> list[ColumnRecord]:
@@ -31,7 +39,13 @@ def exclude_system_columns(columns: list[ColumnRecord]) -> list[ColumnRecord]:
     content_hash() and diff_columns(), so system columns never enter a
     snapshot, the hash gate, or a drift event.
     """
-    return [c for c in columns if not c.column_name.startswith(FIVETRAN_SYSTEM_PREFIX)]
+    return [
+        c for c in columns
+        if not (
+            c.column_name.startswith(FIVETRAN_SYSTEM_PREFIX)
+            or c.column_name.endswith(FIVETRAN_SYSTEM_ID_SUFFIX)
+        )
+    ]
 
 
 def content_hash(columns: list[ColumnRecord]) -> str:

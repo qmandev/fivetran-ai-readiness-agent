@@ -1,6 +1,19 @@
 """Gemini classification + remediation SQL generation (algorithm steps 6-7).
 
 Skeleton — prompt contract and signatures. Implementations TODO.
+
+NAME-MAPPING CAVEAT (G3 finding, 2026-05-21):
+  Diff input comes from BigQuery INFORMATION_SCHEMA — i.e., DESTINATION-side
+  column names. Fivetran's column-config APIs (`modify_connection_column_config`,
+  `delete_connection_column_config`) take SOURCE-side names. For ordinary user
+  columns these match (`customer_id` = `customer_id`). For Fivetran-synthetic
+  columns they diverge — observed: source `ctid` lands in BQ as
+  `ctid_fivetran_id`. When this module produces a remediation that calls
+  Fivetran APIs, it MUST pass source-side names, not the BQ names from the
+  diff. `exclude_system_columns` in snapshot_diff.py currently filters all
+  observed Fivetran synthetics, so the agent never targets them for
+  remediation — but treat that as a load-bearing assumption: if the
+  exclusion rules ever loosen, name-mapping logic must be added here.
 """
 
 from __future__ import annotations

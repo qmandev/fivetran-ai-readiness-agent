@@ -53,6 +53,12 @@ def handle_request(request):
     if payload.get("event") not in SUBSCRIBED_EVENTS:
         return ("ignored", 200)            # not an event we act on
     if payload.get("data", {}).get("status") != "SUCCESSFUL":
+        # Load-bearing filter — DO NOT remove. Fivetran emits a FAILED
+        # sync_end followed by a SUCCESSFUL one when a type-promotion drift
+        # event causes a Teleport Sync Error + auto-retry (observed live
+        # during G2 type_promotion_propagation, 2026-05-21). Acting on the
+        # FAILED event would trigger a spurious agent run before the actual
+        # schema change has landed in BigQuery.
         return ("ignored: non-successful sync", 200)
 
     dispatch(payload)                       # fire-and-forget; returns immediately
