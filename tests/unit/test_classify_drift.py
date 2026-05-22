@@ -42,6 +42,21 @@ def _col(name, t="STRING", ordinal=1, schema="public", table="customers"):
 
 
 def _change(change_type, before, after, schema="public", table="customers"):
+    """Build a ColumnChange for tests.
+
+    IMPORTANT: in real usage `diff_columns` derives ColumnChange's
+    table_schema / table_name from the ColumnRecords it pairs — so the
+    ChangeChange's table and its before/after columns' tables always agree.
+
+    In tests we set them independently here. If a test passes a non-default
+    table to `_col(...)` for the before/after, it MUST also pass the same
+    `table=` to `_change(...)`, or the ColumnChange will carry the default
+    'customers' while its inner records say (e.g.) 'orders' — a state that
+    cannot arise from real `diff_columns` output and that will break any
+    assertion checking the prompt's `<schema>.<table>` FQN. Caught once
+    (test_build_prompt_includes_table_fqn_and_columns, 2026-05-22); this
+    note exists so the same trap doesn't recur in future scenarios.
+    """
     return ColumnChange(schema, table, change_type, before, after)
 
 
@@ -108,9 +123,13 @@ def test_build_prompt_includes_candidate_change_type():
 
 
 def test_build_prompt_includes_table_fqn_and_columns():
+    # _change defaults table='customers'; explicitly set table='orders' here
+    # so the ColumnChange's table_name matches the columns inside it (which
+    # is what diff_columns produces in real usage).
     ch = _change("TYPE_PROMOTION",
                  _col("amount", "BIGNUMERIC", 1, table="orders"),
-                 _col("amount", "STRING", 1, table="orders"))
+                 _col("amount", "STRING", 1, table="orders"),
+                 table="orders")
     p = _build_prompt(ch, downstream_refs=["dbt.orders_summary"])
     assert "public.orders" in p
     assert '"amount"' in p
