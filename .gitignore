@@ -198,3 +198,12 @@ my_env.tfvars
 
 # A2A Inspector
 tools/a2a-inspector/
+
+# Local session-state copies of auto-memory files (canonical copies live in
+# ~/.claude/projects/.../memory/; this is just a working/inspection mirror).
+project_smoke_test_state.md
+
+# Vim swap and backup files
+.*.swp
+.*.swo
+*~

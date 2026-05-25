@@ -13,6 +13,9 @@ dependencies = [
     "google-cloud-aiplatform[evaluation,agent-engines]>=1.130.0",
     "protobuf>=6.31.1,<7.0.0",
     "google-cloud-bigquery>=3.0",
+    # Required by the Functions Framework buildpack on Cloud Run source
+    # deploys (it scans pyproject.toml, not ingest/webhook_receiver/requirements.txt).
+    "functions-framework>=3.0",
 ]
 requires-python = ">=3.11,<3.14"
 

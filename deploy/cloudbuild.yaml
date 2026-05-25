@@ -1,0 +1,115 @@
+# Cloud Build pipeline: webhook receiver deploy + state-store DDL refresh.
+#
+# Both steps are IDEMPOTENT — safe to re-run on every code change.
+#
+# ── Prerequisites (one-time setup, BEFORE first `gcloud builds submit`) ─────
+#   - Create three Secret Manager secrets:
+#       fivetran-webhook-secret, fivetran-api-key, fivetran-api-secret
+#   - Create a dedicated receiver service account `ftar-receiver-sa` and
+#     grant it these roles (the Compute default SA is no longer auto-created
+#     in newer GCP projects — and least-privilege is the right shape anyway):
+#       roles/bigquery.dataEditor, roles/bigquery.jobUser
+#       roles/secretmanager.secretAccessor, roles/aiplatform.user
+#   See deploy/README in fivetranAgentDesign.md for the exact gcloud commands.
+#
+# ── Run ─────────────────────────────────────────────────────────────────────
+#   gcloud builds submit --config=deploy/cloudbuild.yaml
+#
+# ── Architecture notes ─────────────────────────────────────────────────────
+#   - `--source=.` (project root) is REQUIRED so `app/` ships with the
+#     receiver image. The receiver's `dispatch` imports from `app.tools`,
+#     which transitively loads `app/__init__.py` → `app/agent.py`; deploying
+#     only `ingest/webhook_receiver` would fail at runtime.
+#   - `--function=` tells the buildpack to wrap the named Python function
+#     with functions-framework. No separate Procfile / entrypoint needed.
+#   - `--no-cpu-throttling` (Cloud Run "CPU always allocated") is REQUIRED
+#     because `dispatch` spawns a daemon thread that outlives the HTTP
+#     response. Without this flag, the container's CPU is throttled to ~0
+#     after the response is sent and the pipeline would never complete.
+#   - `--allow-unauthenticated`: Fivetran's webhook calls the URL publicly;
+#     authentication is via HMAC-SHA-256 (verified in `verify_signature`).
+
+steps:
+
+  # ── Step 1: ensure the agent_state dataset exists in us-east1 ────────────
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: ensure-dataset
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if bq --location=us-east1 show --dataset "${PROJECT_ID}:agent_state" >/dev/null 2>&1; then
+          echo "agent_state dataset already exists (us-east1)."
+        else
+          bq --location=us-east1 mk --dataset "${PROJECT_ID}:agent_state"
+        fi
+
+  # ── Step 2: apply state-store DDL (CREATE TABLE IF NOT EXISTS) ───────────
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: apply-ddl
+    waitFor: ['ensure-dataset']
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        for f in state/ddl/*.sql; do
+          echo "Applying ${f}..."
+          bq query --project_id="${PROJECT_ID}" --location=us-east1 \
+                   --use_legacy_sql=false < "${f}"
+        done
+        echo "DDL applied. Verifying tables..."
+        bq ls --location=us-east1 "${PROJECT_ID}:agent_state"
+
+  # ── Step 3: deploy receiver to Cloud Run from PROJECT ROOT ───────────────
+  - name: gcr.io/cloud-builders/gcloud
+    id: deploy-receiver
+    waitFor: ['apply-ddl']
+    args:
+      - run
+      - deploy
+      - fivetran-sync-end-receiver
+      - --source=.
+      # Functions Framework buildpack requires `main.py` at the project
+      # root.  We provide a thin shim at /main.py that re-exports
+      # handle_request from ingest/webhook_receiver/main.py, so the dotted
+      # module path doesn't need to appear here.
+      - --function=handle_request
+      - --region=us-east1
+      - --service-account=ftar-receiver-sa@${PROJECT_ID}.iam.gserviceaccount.com
+      # NOTE on the INNER build SA (the Buildpacks build that `--source=.`
+      # transparently triggers):
+      #   `gcloud run deploy --function=` ignores --build-service-account in
+      #   the current gcloud builders image (empirically confirmed
+      #   2026-05-23), so the inner build always runs as the project's
+      #   Compute default SA (910787152095-compute@developer...). To
+      #   unblock, we grant ftar-build-sa `iam.serviceAccountUser` on that
+      #   Compute default. The elevated privilege is scoped to build-time
+      #   only — the deployed Cloud Run service still runs as the
+      #   restricted ftar-receiver-sa (set above).
+      - --allow-unauthenticated
+      - --no-cpu-throttling
+      - --memory=512Mi
+      - --timeout=60s
+      # Pin Python to 3.13 — the buildpack defaults to "latest" (3.14.x),
+      # which violates our pyproject `requires-python = ">=3.11,<3.14"` and
+      # would break `uv sync`.  GOOGLE_RUNTIME_VERSION is a BUILD-time
+      # env var consumed by the python.runtime buildpack.
+      - --set-build-env-vars=GOOGLE_RUNTIME_VERSION=3.13
+      - --set-env-vars=BQ_DESTINATION_DATASET=public,BQ_STATE_DATASET=agent_state,GOOGLE_CLOUD_LOCATION=global,GOOGLE_GENAI_USE_VERTEXAI=TRUE
+      - --set-secrets=FIVETRAN_WEBHOOK_SECRET=fivetran-webhook-secret:latest,FIVETRAN_API_KEY=fivetran-api-key:latest,FIVETRAN_API_SECRET=fivetran-api-secret:latest
+
+options:
+  # CLOUD_LOGGING_ONLY is REQUIRED when using a custom serviceAccount —
+  # Cloud Build's default logs bucket isn't writable by user-managed SAs.
+  logging: CLOUD_LOGGING_ONLY
+
+# Custom build service account. Modern GCP projects no longer auto-create
+# the legacy `PROJECT_NUMBER@cloudbuild.gserviceaccount.com` default, so we
+# point at a dedicated SA (`ftar-build-sa`) explicitly. That SA must have:
+#   roles/cloudbuild.builds.builder, roles/logging.logWriter,
+#   roles/storage.admin, roles/run.admin, roles/artifactregistry.writer,
+#   roles/bigquery.dataEditor, roles/bigquery.jobUser,
+#   roles/iam.serviceAccountUser ON `ftar-receiver-sa` (to "act as" it at deploy time).
+serviceAccount: projects/${PROJECT_ID}/serviceAccounts/ftar-build-sa@${PROJECT_ID}.iam.gserviceaccount.com
