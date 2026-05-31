@@ -13,6 +13,8 @@ dependencies = [
     "google-cloud-aiplatform[evaluation,agent-engines]>=1.130.0",
     "protobuf>=6.31.1,<7.0.0",
     "google-cloud-bigquery>=3.0",
+    "google-cloud-secret-manager>=2",
+    "fivetran-mcp @ git+https://github.com/fivetran/fivetran-mcp",
     # Required by the Functions Framework buildpack on Cloud Run source
     # deploys (it scans pyproject.toml, not ingest/webhook_receiver/requirements.txt).
     "functions-framework>=3.0",
@@ -91,6 +93,9 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 pythonpath = "."
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["app","frontend"]

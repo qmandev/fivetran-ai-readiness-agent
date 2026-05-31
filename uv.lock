@@ -514,12 +514,14 @@ name = "fivetran-ai-readiness-agent"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "fivetran-mcp" },
     { name = "functions-framework" },
     { name = "gcsfs" },
     { name = "google-adk" },
     { name = "google-cloud-aiplatform", extra = ["agent-engines", "evaluation"] },
     { name = "google-cloud-bigquery" },
     { name = "google-cloud-logging" },
+    { name = "google-cloud-secret-manager" },
     { name = "opentelemetry-instrumentation-google-genai" },
     { name = "protobuf" },
 ]
@@ -544,6 +546,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "codespell", marker = "extra == 'lint'", specifier = ">=2.2.0,<3.0.0" },
+    { name = "fivetran-mcp", git = "https://github.com/fivetran/fivetran-mcp" },
     { name = "functions-framework", specifier = ">=3.0" },
     { name = "gcsfs", specifier = ">=2024.11.0" },
     { name = "google-adk", specifier = ">=1.15.0,<2.0.0" },
@@ -551,6 +554,7 @@ requires-dist = [
     { name = "google-cloud-aiplatform", extras = ["evaluation", "agent-engines"], specifier = ">=1.130.0" },
     { name = "google-cloud-bigquery", specifier = ">=3.0" },
     { name = "google-cloud-logging", specifier = ">=3.12.0,<4.0.0" },
+    { name = "google-cloud-secret-manager", specifier = ">=2" },
     { name = "opentelemetry-instrumentation-google-genai", specifier = ">=0.1.0,<1.0.0" },
     { name = "protobuf", specifier = ">=6.31.1,<7.0.0" },
     { name = "ruff", marker = "extra == 'lint'", specifier = ">=0.4.6,<1.0.0" },
@@ -563,6 +567,16 @@ dev = [
     { name = "nest-asyncio", specifier = ">=1.6.0,<2.0.0" },
     { name = "pytest", specifier = ">=8.3.4,<9.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.23.8,<1.0.0" },
+]
+
+[[package]]
+name = "fivetran-mcp"
+version = "0.1.0"
+source = { git = "https://github.com/fivetran/fivetran-mcp#0f06047e354410b40c5afb25633af1ea490151b8" }
+dependencies = [
+    { name = "httpx" },
+    { name = "mcp" },
+    { name = "python-dotenv" },
 ]
 
 [[package]]

@@ -237,6 +237,30 @@ def insert_drift_event(event: dict) -> None:
     _client().query(sql, location=BQ_LOCATION, job_config=cfg).result()
 
 
+def list_proposed_drift_events() -> list[dict]:
+    """Return all drift_events rows with remediation_status = 'PROPOSED'.
+
+    Includes drift_id, connection_id, detected_at, change_type, table_schema,
+    table_name, column_before, column_after, classification_conf,
+    gemini_rationale, remediation_sql, and remediation_status. Returns an
+    empty list when there are no PROPOSED events. Use this to surface pending
+    findings for human review before calling approve_drift or reject_drift.
+    """
+    sql = (
+        "SELECT drift_id, connection_id, detected_at, change_type, "
+        "table_schema, table_name, "
+        "TO_JSON_STRING(column_before) AS column_before, "
+        "TO_JSON_STRING(column_after) AS column_after, "
+        "classification_conf, gemini_rationale, remediation_sql, "
+        "remediation_status "
+        f"FROM {_state_table_fqn('drift_events')} "
+        "WHERE remediation_status = 'PROPOSED' "
+        "ORDER BY detected_at"
+    )
+    rows = _client().query(sql, location=BQ_LOCATION).result()
+    return [dict(r) for r in rows]
+
+
 def update_drift_event(drift_id: str, **updates: Any) -> None:
     """Update a drift_events row's lifecycle fields. Common transitions:
         remediation_status: PROPOSED -> APPROVED -> APPLIED -> VERIFIED

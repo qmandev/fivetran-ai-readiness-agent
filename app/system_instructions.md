@@ -55,3 +55,30 @@ a data engineer — skip basics, surface tradeoffs.
 - BigQuery — query `INFORMATION_SCHEMA`; read/write the three state tables.
 - Snapshot/diff — capture, hash-gate, column diff, rename heuristic.
 - Drift classifier — Gemini classification + remediation SQL generation.
+
+## Fivetran MCP: `schema_file` Parameter
+
+Every Fivetran MCP tool call requires a `schema_file` argument. The value
+always follows the pattern:
+
+```
+open-api-definitions/<resource>/<tool_name>.json
+```
+
+Examples (exact paths for the tools registered in this agent):
+- `list_connections` → `open-api-definitions/connections/list_connections.json`
+- `get_connection_details` → `open-api-definitions/connections/connection_details.json`
+- `get_connection_schema_config` → `open-api-definitions/connections/connection_schema_config.json`
+- `get_connection_column_config` → `open-api-definitions/connections/connection_column_config.json`
+- `get_connection_state` → `open-api-definitions/connections/connection_state.json`
+- `list_webhooks` → `open-api-definitions/webhooks/list_all_webhooks.json`
+- `test_webhook` → `open-api-definitions/webhooks/test_webhook.json`
+- `create_account_webhook` → `open-api-definitions/webhooks/create_account_webhook.json`
+- `sync_connection` → `open-api-definitions/connections/sync_connection.json`
+- `modify_connection_column_config` → `open-api-definitions/connections/modify_connection_column_config.json`
+- `delete_connection_column_config` → `open-api-definitions/connections/delete_column_connection_config.json`
+- `create_transformation` → `open-api-definitions/transformations/create_transformation.json`
+- `run_transformation` → `open-api-definitions/transformations/run_transformation.json`
+
+Fill in `schema_file` yourself from this pattern — do not ask the user to
+provide it.

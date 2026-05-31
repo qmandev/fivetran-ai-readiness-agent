@@ -58,69 +58,78 @@ os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
 os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "True"
 
 from .tools import bigquery_query  # noqa: E402  — must follow auth bootstrap
+from .tools.bigquery_query import list_proposed_drift_events  # noqa: E402
 
 INSTRUCTION = (Path(__file__).parent / "system_instructions.md").read_text()
 
 
-# === Fivetran MCP toolset ====================================================
-# 14-tool filter per design doc API Surface Map §B2/B3 (the only Fivetran API
-# surface the agent actually needs for v1 schema-drift remediation).
+# === Fivetran MCP toolsets ===================================================
+# Split into two McpToolsets (same server, different tool_filter slices) so
+# we can use require_confirmation=True/False (bool) per ADK 1.x's actual
+# calling convention. ADK calls the require_confirmation callable with
+# **tool_input_args, not the tool object — so a predicate can't inspect the
+# tool name. Splitting by write vs read avoids that limitation entirely.
 #
-# The `require_confirmation` predicate is the ADK 1.x Action-confirmations
-# gate: WRITE tools prompt the user before executing; READ tools flow
-# through immediately. This realises Resolved Decision #2's
-# "propose-not-apply" default at the tool-binding layer — even if the LLM
-# decides to call a write tool unexpectedly, ADK pauses for human approval.
-_FIVETRAN_WRITE_TOOLS = frozenset({
-    "create_account_webhook",
-    "modify_connection_column_config",
-    "delete_connection_column_config",
-    "create_transformation",
-    "run_transformation",
-    "sync_connection",
-})
+# READ toolset — flows through immediately (no confirmation prompt).
+# WRITE toolset — every call pauses for explicit human approval, realising
+# Resolved Decision #2's "propose-not-apply" default at the tool-binding
+# layer.
 
+def _secret_or_env(env_var: str, secret_name: str) -> str:
+    val = os.environ.get(env_var, "")
+    if val:
+        return val
+    try:
+        from google.cloud import secretmanager  # noqa: PLC0415
+        client = secretmanager.SecretManagerServiceClient()
+        name = f"projects/{project_id}/secrets/{secret_name}/versions/latest"
+        return client.access_secret_version(request={"name": name}).payload.data.decode()
+    except Exception:
+        return ""
+          
+def _mcp_env() -> dict:
+    return {
+        "FIVETRAN_API_KEY": _secret_or_env("FIVETRAN_API_KEY", "fivetran-api-key"),
+        "FIVETRAN_API_SECRET": _secret_or_env("FIVETRAN_API_SECRET", "fivetran-api-secret"),
+        "FIVETRAN_ALLOW_WRITES": "true",
+    }   
 
-def _require_confirmation(tool, *_args, **_kwargs) -> bool:
-    """Return True iff the given MCP tool is a Fivetran write. ADK 1.x calls
-    this predicate per tool invocation; True triggers an Action-confirmation
-    prompt before the tool actually runs."""
-    name = getattr(tool, "name", None) or str(tool)
-    # Tool names from the MCP server arrive verbatim; the conservative match
-    # below substring-tests the write-tool set so any prefixed/wrapped variant
-    # still gates correctly.
-    return any(write_name in name for write_name in _FIVETRAN_WRITE_TOOLS)
+def _mcp_server() -> StdioServerParameters:
+    import sys, pathlib
+    scripts = pathlib.Path(sys.executable).parent
+    fivetran_bin = scripts / "fivetran-mcp"
+    return StdioServerParameters(
+        command=str(fivetran_bin),
+        args=[],
+        env=_mcp_env(),
+    ) 
 
-
-fivetran_mcp = McpToolset(
+fivetran_mcp_reads = McpToolset(
     connection_params=StdioConnectionParams(
-        server_params=StdioServerParameters(
-            command="uvx",
-            args=[
-                "--from", "git+https://github.com/fivetran/fivetran-mcp",
-                "fivetran-mcp",
-            ],
-            env={
-                "FIVETRAN_API_KEY": os.environ.get("FIVETRAN_API_KEY", ""),
-                "FIVETRAN_API_SECRET": os.environ.get("FIVETRAN_API_SECRET", ""),
-                # Writes are enabled at the MCP env-var layer; the actual
-                # gating happens via `require_confirmation` above so users
-                # see an explicit confirmation prompt before any write.
-                "FIVETRAN_ALLOW_WRITES": "true",
-            },
-        ),
-        timeout=10.0,
+        server_params=_mcp_server(), timeout=10.0
     ),
     tool_filter=[
         "list_connections", "get_connection_details",
-        "create_account_webhook", "list_webhooks", "test_webhook",
+        "list_webhooks", "test_webhook",
         "get_connection_schema_config", "get_connection_column_config",
-        "modify_connection_column_config", "delete_connection_column_config",
-        "create_transformation", "run_transformation",
         "get_transformation_details", "get_connection_state",
+    ],
+    require_confirmation=False,
+)
+
+fivetran_mcp_writes = McpToolset(
+    connection_params=StdioConnectionParams(
+        server_params=_mcp_server(), timeout=10.0
+    ),
+    tool_filter=[
+        "create_account_webhook",
+        "modify_connection_column_config",
+        "delete_connection_column_config",
+        "create_transformation",
+        "run_transformation",
         "sync_connection",
     ],
-    require_confirmation=_require_confirmation,
+    require_confirmation=True,
 )
 
 
@@ -206,11 +215,13 @@ root_agent = Agent(
     ),
     instruction=INSTRUCTION,
     tools=[
+        list_proposed_drift_events,
         approve_drift,
         reject_drift,
         mark_drift_applied,
         mark_drift_verified,
-        fivetran_mcp,
+        fivetran_mcp_reads,
+        fivetran_mcp_writes,
     ],
 )
 
