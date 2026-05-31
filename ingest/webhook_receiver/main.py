@@ -93,6 +93,23 @@ def _run_detection_pipeline(payload: dict) -> None:
         sync_id = payload.get("sync_id", "")
         connection_name = payload.get("connector_name", "")
         destination_schema = resolve_destination_schema(connection_id)
+        received_at = datetime.now(timezone.utc).isoformat()
+
+        # Step 0: log every successful sync_end for freshness monitoring.
+        # Written before the hash gate so freshness timestamps reflect every
+        # sync, not just syncs that produced a schema change.
+        # payload["created"] is Fivetran's reported sync completion time;
+        # fall back to received_at if absent.
+        try:
+            bigquery_query.write_sync_log({
+                "log_id": str(uuid.uuid4()),
+                "connection_id": connection_id,
+                "sync_id": sync_id or None,
+                "synced_at": payload.get("created", received_at),
+                "received_at": received_at,
+            })
+        except Exception:
+            log.warning("sync_log write failed for %s; continuing.", connection_id)
 
         # Steps 1-3: fetch landed columns, exclude Fivetran system columns,
         # hash, compare against the latest persisted snapshot.

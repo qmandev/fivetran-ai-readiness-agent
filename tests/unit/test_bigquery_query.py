@@ -35,6 +35,7 @@ from app.tools.bigquery_query import (
     ColumnRecord,
     _as_json_string,
     _columns_query,
+    _default_sla_hours,
     _drift_event_placeholder,
     _row_to_column_record,
     _state_table_fqn,
@@ -213,3 +214,21 @@ def test_update_drift_event_rejects_unknown_fields(monkeypatch):
     from app.tools.bigquery_query import update_drift_event
     with pytest.raises(ValueError, match="unknown drift_events field"):
         update_drift_event("d1", remediation_status="APPROVED", typo="oops")
+
+
+# --- _default_sla_hours --------------------------------------------------------
+
+def test_default_sla_hours_returns_24_when_unset(monkeypatch):
+    """24 hours is the documented default when FRESHNESS_SLA_HOURS is absent."""
+    monkeypatch.delenv("FRESHNESS_SLA_HOURS", raising=False)
+    assert _default_sla_hours() == 24.0
+
+
+def test_default_sla_hours_reads_env_var(monkeypatch):
+    monkeypatch.setenv("FRESHNESS_SLA_HOURS", "6")
+    assert _default_sla_hours() == 6.0
+
+
+def test_default_sla_hours_accepts_fractional(monkeypatch):
+    monkeypatch.setenv("FRESHNESS_SLA_HOURS", "0.5")
+    assert _default_sla_hours() == 0.5

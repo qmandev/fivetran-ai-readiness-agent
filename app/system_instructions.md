@@ -52,9 +52,30 @@ a data engineer — skip basics, surface tradeoffs.
 
 - Fivetran MCP — enumerate connections, register webhooks, create/run
   transformations, modify column config.
-- BigQuery — query `INFORMATION_SCHEMA`; read/write the three state tables.
+- BigQuery — query `INFORMATION_SCHEMA`; read/write the state tables.
 - Snapshot/diff — capture, hash-gate, column diff, rename heuristic.
 - Drift classifier — Gemini classification + remediation SQL generation.
+- Freshness SLA — `check_freshness_sla` (single connection) and
+  `list_freshness_status` (all connections). Both read from `sync_log`,
+  which records every successful `sync_end` event. The SLA threshold
+  defaults to the `FRESHNESS_SLA_HOURS` env var (24 h if unset); pass
+  `sla_hours` explicitly to override per-call.
+
+## Freshness SLA Guidance
+
+When a user asks whether data is "fresh", "up to date", "stale", or whether
+a pipeline "ran recently":
+
+1. Use `check_freshness_sla(connection_id=...)` for a named connection.
+2. Use `list_freshness_status()` when the user wants a fleet-wide view or
+   doesn't specify a connection.
+3. Report `hours_since_sync` and `status` in plain language. Example:
+   "Connection assimilate_seem last synced 2.4 h ago — within the 24 h SLA (OK)."
+4. A `NEVER_SYNCED` status means the connection has not yet fired a
+   `sync_end` webhook — direct the user to check whether the connection is
+   active in Fivetran.
+5. For `STALE` connections, offer to trigger a manual sync via the Fivetran
+   MCP `sync_connection` tool (subject to the usual write-approval gate).
 
 ## Fivetran MCP: `schema_file` Parameter
 

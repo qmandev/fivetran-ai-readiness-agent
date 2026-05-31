@@ -102,6 +102,46 @@
         "user_id": "eval_user",
         "state": {}
       }
+    },
+    {
+      "eval_id": "check_single_connection_freshness",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [{"text": "Is connection assimilate_seem within its freshness SLA?"}]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {"name": "check_freshness_sla", "args": {"connection_id": "assimilate_seem"}}
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "app",
+        "user_id": "eval_user",
+        "state": {}
+      }
+    },
+    {
+      "eval_id": "list_all_freshness_status",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [{"text": "Show me freshness status for all connections"}]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {"name": "list_freshness_status", "args": {}}
+            ]
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "app",
+        "user_id": "eval_user",
+        "state": {}
+      }
     }
   ]
 }
