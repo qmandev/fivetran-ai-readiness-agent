@@ -1,13 +1,19 @@
 # Fivetran AI-Readiness Agent
 
 > Fivetran lands the data. We make sure it stays AI-ready — detecting schema drift,
-> classifying blast radius, and gating every fix behind human approval.
+> classifying blast radius, gating every fix behind human approval, and surfacing
+> freshness SLA status across your entire connection fleet.
 
-**v1 capability:** Schema-Drift Downstream Impact Resolver. When a Fivetran sync
-changes the landed schema (rename, type promotion, column reorder, new field,
-deprecation), the agent detects it, classifies it with Gemini, proposes a
-VIEW-based remediation, and — on your explicit approval — deploys it via
-Fivetran's own `transformations` API.
+**v1 capability:** Schema-Drift Downstream Impact Resolver — detects every schema
+change the moment Fivetran lands it, classifies blast radius with Gemini, and gates
+every remediation behind explicit human approval via Fivetran's `transformations` API.
+
+**v2 capabilities (2026-05-31):**
+- **Multi-connection support** — each Fivetran connection resolves to its own BQ dataset
+  via the Fivetran REST API (no more single hardcoded `BQ_DESTINATION_DATASET`).
+- **Freshness SLA monitor** — `check_freshness_sla` and `list_freshness_status` tools
+  let you ask "is my data fresh enough?" for a single connection or your whole fleet.
+  Every successful `sync_end` is recorded in `sync_log`; threshold via `FRESHNESS_SLA_HOURS`.
 
 Built with **Google ADK 1.x** · **Gemini Flash** · **Gemini Enterprise Agent Platform** ·
 **BigQuery** · the official [Fivetran MCP server](https://github.com/fivetran/fivetran-mcp).
@@ -15,16 +21,19 @@ Built with **Google ADK 1.x** · **Gemini Flash** · **Gemini Enterprise Agent P
 See `../fivetranAgentDesign.md` for the full design rationale, resolved decisions,
 and live test results.
 
-## Status — v1 Complete (2026-05-29)
+## Status — v2 Complete (2026-05-31)
 
 | Component | State |
 |---|---|
-| Detection pipeline (webhook → snapshot → diff → classify → drift_events) | ✅ Live — two real events captured 2026-05-25 |
+| Detection pipeline (webhook → sync_log → snapshot → diff → classify → drift_events) | ✅ Live |
+| Multi-connection resolver (`connection_id → BQ dataset` via Fivetran REST API) | ✅ Live (v2) |
+| Freshness SLA monitor (`sync_log` + `check_freshness_sla` / `list_freshness_status`) | ✅ Live (v2) |
 | HITL agent flow (PROPOSED → APPROVED → APPLIED → VERIFIED) | ✅ Live — both events driven to VERIFIED 2026-05-26 |
-| Write-tool confirmation gate (`require_confirmation=True`) | ✅ Verified — `adk_request_confirmation` event fires on Agent Runtime 2026-05-29 |
+| Write-tool confirmation gate (`require_confirmation=True`) | ✅ Verified — `adk_request_confirmation` event fires on Agent Runtime |
 | Agent Runtime deployment | ✅ Live at `reasoningEngines/2248457298336808960` (us-east1) |
 | Webhook receiver | ✅ Live at Cloud Run `fivetran-sync-end-receiver` (us-east1), min-instances=1 |
-| Unit tests | ✅ 84/84 passing |
+| Eval suite | ✅ 7/7 cases passing `tool_trajectory_avg_score=1.0` |
+| Unit tests | ✅ 104/104 passing |
 
 ## Layout
 
@@ -32,33 +41,59 @@ Canonical `agents-cli create --prototype --adk` structure. `[gen]` = template-ge
 `[port]` = project code, `[infra]` = non-template infrastructure.
 
 ```
-pyproject.toml            [gen+port] deps (google-adk 1.x, bigquery, fivetran-mcp,
-                                          secret-manager) + [tool.agents-cli]
-uv.lock                   [gen] committed for reproducibility
-deployment_metadata.json  [gen] deploy target = agent_runtime (us-east1)
-CLAUDE.md                 [gen] coding-agent guidance
+pyproject.toml              [gen+port] deps (google-adk 1.x, bigquery, fivetran-mcp,
+                                            secret-manager, functions-framework)
+agents-cli-manifest.yaml    [gen+port] deployment target = agent_runtime (us-east1);
+                                       migrated from [tool.agents-cli] by scaffold upgrade
+uv.lock                     [gen] committed for reproducibility
+CLAUDE.md                   [gen] coding-agent guidance
 app/
-  __init__.py             [gen] exports `app`
-  agent.py                [port] root_agent + App; McpToolset split (read/write);
-                                 _secret_or_env() for Agent Runtime credential fallback
-  agent_runtime_app.py    [gen] Agent Runtime entrypoint
-  system_instructions.md  [port] loaded as instruction=; includes schema_file patterns
-  app_utils/              [gen] telemetry.py, typing.py
+  __init__.py               [gen] exports `app`
+  agent.py                  [port] root_agent + App; 7 FunctionTools (drift lifecycle +
+                                   check_freshness_sla + list_freshness_status);
+                                   McpToolset split (read/write);
+                                   _secret_or_env() for Agent Runtime credential fallback
+  agent_runtime_app.py      [gen] Agent Runtime entrypoint
+  system_instructions.md    [port] loaded as instruction=; schema_file patterns +
+                                   freshness SLA guidance
+  app_utils/                [gen] telemetry.py, typing.py
   tools/
-    bigquery_query.py     [port] state-table CRUD + list_proposed_drift_events()
-    snapshot_diff.py      [port] capture_and_gate, content_hash, diff_columns
-    classify_drift.py     [port] Gemini classifier + remediation SQL generator
+    bigquery_query.py       [port] state-table CRUD; list_proposed_drift_events;
+                                   write_sync_log, check_freshness_sla,
+                                   list_freshness_status (v2)
+    snapshot_diff.py        [port] capture_and_gate, content_hash, diff_columns
+    classify_drift.py       [port] Gemini classifier + remediation SQL generator
 tests/
-  eval/eval_config.json           [port] LLM-as-judge criteria
-  eval/evalsets/
-    drift_trajectories.evalset.json [port] 5 HITL trajectory cases
-    basic.evalset.json            [gen] template default (reference)
-    README.md                     [gen] eval schema reference
-  unit/                           [port] 84 unit tests across all 4 modules
-ingest/webhook_receiver/  [infra] Cloud Run sync_end receiver (separate service)
-state/ddl/                [infra] BigQuery DDL for 3 state tables
-scripts/                  [infra] Fivetran connector setup + key/tier probes
-deploy/env.example        [infra] env var template (Fivetran/BQ/GCP)
+  eval/
+    eval_config.json        [port] tool_trajectory_avg_score=1.0 (response_match_score
+                                   excluded — no expected final_response in cases)
+    evalsets/
+      drift_trajectories.evalset.json  [port] 7 HITL trajectory cases (5 drift
+                                              lifecycle + 2 freshness SLA)
+      basic.evalset.json               [gen] template default (reference)
+      README.md                        [port] eval schema + usage notes
+  unit/                     [port] 104 unit tests across 5 modules
+    test_bigquery_query.py
+    test_classify_drift.py
+    test_snapshot_diff.py
+    test_webhook_receiver.py
+    test_connection_resolver.py        [port] v2 — 15 cases for resolver
+ingest/
+  webhook_receiver/
+    main.py                 [port] Cloud Run handler: HMAC verify → dispatch →
+                                   _run_detection_pipeline (write_sync_log + drift pipeline)
+    connection_resolver.py  [port] v2 — connection_id → BQ dataset via Fivetran REST API
+    requirements.txt        [infra] fallback deps (canonical source is pyproject.toml)
+state/ddl/                  [infra] BigQuery DDL for 4 state tables
+  01_schema_snapshots.sql
+  02_column_snapshots.sql
+  03_drift_events.sql
+  04_sync_log.sql                      [infra] v2 — one row per successful sync_end
+scripts/                    [infra] Fivetran connector setup + key/tier probes
+deploy/
+  cloudbuild.yaml           [infra] Cloud Build: DDL apply (all state/ddl/*.sql) +
+                                    receiver redeploy from project root
+  env.example               [infra] env var template
 ```
 
 ## Data Flow
@@ -66,9 +101,13 @@ deploy/env.example        [infra] env var template (Fivetran/BQ/GCP)
 ```
 Fivetran sync_end (HMAC-SHA-256 signed POST)
   → Cloud Run webhook_receiver
-      verify_signature → 401 on mismatch
+      verify_signature → 401 on mismatch; ignore FAILED syncs (Teleport-retry guard)
       ack 200 within 10s → fire-and-forget daemon thread
   → _run_detection_pipeline
+      resolve_destination_schema(connection_id)        [v2]
+        Fivetran REST API lookup + in-process cache
+        fallback → BQ_DESTINATION_DATASET env var
+      write_sync_log → sync_log [v2]                  ← every sync, before hash gate
       capture_and_gate: INFORMATION_SCHEMA → content_hash
         unchanged → exit cheap (hash gate)
         bootstrap → write baseline snapshot, no diff
@@ -79,7 +118,9 @@ Fivetran sync_end (HMAC-SHA-256 signed POST)
       classify_drift (Gemini Flash) × N → VIEW shim SQL + confidence
       insert_drift_event × N → drift_events [PROPOSED]
   → Agent Runtime playground (human review)
-      list_proposed_drift_events → surface pending findings
+      list_proposed_drift_events  → surface PROPOSED queue
+      check_freshness_sla         → single-connection freshness check [v2]
+      list_freshness_status       → fleet-wide freshness, stalest first [v2]
       approve_drift / reject_drift → APPROVED / REJECTED
       Fivetran MCP write tools (confirmation-gated) → create_transformation / run
       mark_drift_applied → APPLIED
@@ -104,22 +145,34 @@ uv sync
 # 2. Copy env template and fill credentials
 cp deploy/env.example deploy/.env
 # Edit deploy/.env: FIVETRAN_API_KEY, FIVETRAN_API_SECRET, GCP_PROJECT_ID,
-#                   BQ_DESTINATION_DATASET, BQ_LOCATION
+#                   BQ_DESTINATION_DATASET (fallback dataset for resolver),
+#                   FRESHNESS_SLA_HOURS (optional; default 24)
 
-# 3. Apply BigQuery state-table DDL (one-time)
-bq query --location=us-east1 --use_legacy_sql=false < state/ddl/schema_snapshots.sql
-bq query --location=us-east1 --use_legacy_sql=false < state/ddl/drift_events.sql
+# 3. Apply BigQuery state-table DDL (one-time; re-run is safe — IF NOT EXISTS)
+for f in state/ddl/*.sql; do
+  bq query --location=us-east1 --use_legacy_sql=false < "$f"
+done
 
 # 4. Run unit tests
 uv run pytest tests/unit/ -v
 
-# 5. Local agent (CLI)
+# 5. Run eval suite
+uvx google-agents-cli eval run --evalset tests/eval/evalsets/drift_trajectories.evalset.json
+
+# 6. Local agent (CLI)
 set -a && source deploy/.env && set +a
 uv run adk run app
 
-# 6. Local agent (web UI — pass parent dir, not app/)
+# 7. Local agent (web UI — pass parent dir, not app/)
 set -a && source deploy/.env && set +a
 uv run adk web .
+```
+
+### Webhook receiver + DDL deployment
+
+```bash
+# Applies state/ddl/*.sql (incl. 04_sync_log.sql) and redeploys the receiver.
+gcloud builds submit --config=deploy/cloudbuild.yaml
 ```
 
 ### Agent Runtime deployment
@@ -128,9 +181,9 @@ Credentials are read from GCP Secret Manager at runtime — no `.env` needed in 
 
 ```bash
 # Store credentials (one-time)
-echo -n "$FIVETRAN_API_KEY" | gcloud secrets create fivetran-api-key \
+printf "%s" "$FIVETRAN_API_KEY" | gcloud secrets create fivetran-api-key \
   --data-file=- --project api-project-910787152095
-echo -n "$FIVETRAN_API_SECRET" | gcloud secrets create fivetran-api-secret \
+printf "%s" "$FIVETRAN_API_SECRET" | gcloud secrets create fivetran-api-secret \
   --data-file=- --project api-project-910787152095
 
 # Grant Agent Runtime SA access
@@ -141,14 +194,9 @@ gcloud secrets add-iam-policy-binding fivetran-api-secret \
   --member="serviceAccount:service-910787152095@gcp-sa-aiplatform-re.iam.gserviceaccount.com" \
   --role="roles/secretmanager.secretAccessor"
 
-# Deploy (5-10 min)
+# Deploy agent (5-10 min)
 uvx google-agents-cli deploy --project api-project-910787152095
 ```
-
-### Webhook receiver deployment
-
-See `ingest/webhook_receiver/` — deployed separately to Cloud Run. Register the
-`sync_end` webhook via the Fivetran MCP or dashboard after deployment.
 
 ## Key Implementation Notes
 
@@ -171,12 +219,23 @@ automatically without asking the user.
 to avoid BigQuery's 90-minute streaming-buffer DML lag — subsequent `UPDATE` calls
 work immediately.
 
-## Known Limitations (v1)
+**Multi-connection resolver.** `ingest/webhook_receiver/connection_resolver.py` calls
+`GET /v1/connectors/{connection_id}` (Basic auth) on first encounter and caches the
+result in-process. Falls back to `BQ_DESTINATION_DATASET` on any error so single-
+connection setups continue to work with zero config change.
 
-- Webhook receiver reads `BQ_DESTINATION_DATASET=public` regardless of connection ID.
-  Multi-connection deployments need a `connection_id → destination_schema` resolver.
-- `agents-cli eval run` skipped — version mismatch between scaffold (0.1.3) and
-  current CLI (0.2.1). Run `agents-cli scaffold upgrade` before evaluating.
+**Freshness SLA monitor.** `sync_log` is written as Step 0 of the detection pipeline,
+before the hash gate — so every successful sync is recorded even when the schema is
+unchanged. `check_freshness_sla` / `list_freshness_status` query `sync_log` and return
+`OK`, `STALE`, or `NEVER_SYNCED`. SLA threshold defaults to `FRESHNESS_SLA_HOURS=24`;
+overridable per-call for connections with tighter SLAs.
+
+## Known Limitations
+
 - Agent Runtime playground does not render an Approve/Reject widget — confirmation
   fires at the ADK protocol layer (`adk_request_confirmation` event) but the visual
-  widget is a hosting-layer feature not yet surfaced in the playground UI.
+  widget is a hosting-layer feature not yet surfaced in the playground UI. Text reply
+  serves as the approval signal.
+- `list_freshness_status` only surfaces connections that have fired at least one
+  successful `sync_end` webhook. Connections that are paused or newly added will not
+  appear until their first sync lands.
