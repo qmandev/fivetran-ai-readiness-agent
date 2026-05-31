@@ -44,6 +44,7 @@ import uuid
 from datetime import datetime, timezone
 
 from app.tools import bigquery_query, classify_drift, snapshot_diff
+from ingest.webhook_receiver.connection_resolver import resolve_destination_schema
 
 SUBSCRIBED_EVENTS = {"sync_end"}
 
@@ -91,7 +92,7 @@ def _run_detection_pipeline(payload: dict) -> None:
         connection_id = payload["connector_id"]
         sync_id = payload.get("sync_id", "")
         connection_name = payload.get("connector_name", "")
-        destination_schema = os.environ.get("BQ_DESTINATION_DATASET", "public")
+        destination_schema = resolve_destination_schema(connection_id)
 
         # Steps 1-3: fetch landed columns, exclude Fivetran system columns,
         # hash, compare against the latest persisted snapshot.

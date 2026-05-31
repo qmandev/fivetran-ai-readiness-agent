@@ -223,6 +223,7 @@ def _patch_pipeline_deps(
     prior_columns: list | None = None,
     diff_changes: list | None = None,
     classify_response: Classification | None = None,
+    destination_schema: str = "public",
 ):
     """Install stubs on the deps the pipeline calls. Captures every call
     so tests can assert behavior."""
@@ -230,6 +231,8 @@ def _patch_pipeline_deps(
         write_snapshot=[], load_columns=[], diff_columns=[],
         classify=[], insert_drift_event=[],
     )
+    # Stub the resolver so tests never make real Fivetran API calls.
+    monkeypatch.setattr(wr, "resolve_destination_schema", lambda cid: destination_schema)
     monkeypatch.setattr(wr.snapshot_diff, "capture_and_gate",
                         lambda cid, ds: gate_result)
     monkeypatch.setattr(wr.bigquery_query, "write_snapshot",
@@ -362,6 +365,7 @@ def test_pipeline_continues_after_per_change_classify_error(monkeypatch):
         return Classification(change_type="TYPE_PROMOTION", confidence=0.8,
                               rationale="ok", remediation_sql="VIEW...")
 
+    monkeypatch.setattr(wr, "resolve_destination_schema", lambda cid: "public")
     monkeypatch.setattr(wr.snapshot_diff, "capture_and_gate",
                         lambda cid, ds: gate)
     monkeypatch.setattr(wr.bigquery_query, "write_snapshot",
@@ -388,6 +392,8 @@ def test_pipeline_swallows_top_level_exception(monkeypatch):
     must not propagate out of the background thread — it'd silently kill
     the thread otherwise. The pipeline log.exceptions and returns; the
     NEXT sync_end retries the whole flow (convergent design)."""
+    monkeypatch.setattr(wr, "resolve_destination_schema", lambda cid: "public")
+
     def boom(cid, ds):
         raise RuntimeError("BQ unavailable")
     monkeypatch.setattr(wr.snapshot_diff, "capture_and_gate", boom)
