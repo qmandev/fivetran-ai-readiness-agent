@@ -9,11 +9,15 @@ This directory contains evaluation sets for testing agent behavior using `adk ev
 agents-cli eval run
 
 # Run specific evalset
-agents-cli eval run --evalset tests/eval/evalsets/custom.evalset.json
+agents-cli eval run --evalset tests/eval/evalsets/drift_trajectories.evalset.json
 
 # Run all evalsets
 agents-cli eval run --all
 ```
+
+> **Note (v1):** This project was scaffolded with `agents-cli 0.1.3`. The current
+> CLI is `0.2.1`. Run `agents-cli scaffold upgrade` to migrate to
+> `agents-cli-manifest.yaml` before running eval to avoid config-mismatch errors.
 
 ## Evalset Format
 
