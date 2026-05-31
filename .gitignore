@@ -196,6 +196,9 @@ my_env.tfvars
 .requirements.txt
 .google-agents-cli/
 
+# ADK runtime artifacts (session DB + timestamped eval result JSONs)
+app/.adk/
+
 # A2A Inspector
 tools/a2a-inspector/
 
