@@ -18,8 +18,8 @@ every remediation behind explicit human approval via Fivetran's `transformations
 Built with **Google ADK 1.x** · **Gemini Flash** · **Gemini Enterprise Agent Platform** ·
 **BigQuery** · the official [Fivetran MCP server](https://github.com/fivetran/fivetran-mcp).
 
-See `../fivetranAgentDesign.md` for the full design rationale, resolved decisions,
-and live test results.
+See [`DESIGN.md`](DESIGN.md) for architecture decisions and design rationale.
+See [`TEST.md`](TEST.md) for live test results and empirical findings.
 
 ## Status — v2 Complete (2026-05-31)
 
@@ -182,20 +182,20 @@ Credentials are read from GCP Secret Manager at runtime — no `.env` needed in 
 ```bash
 # Store credentials (one-time)
 printf "%s" "$FIVETRAN_API_KEY" | gcloud secrets create fivetran-api-key \
-  --data-file=- --project api-project-910787152095
+  --data-file=- --project YOUR_GCP_PROJECT_ID
 printf "%s" "$FIVETRAN_API_SECRET" | gcloud secrets create fivetran-api-secret \
-  --data-file=- --project api-project-910787152095
+  --data-file=- --project YOUR_GCP_PROJECT_ID
 
 # Grant Agent Runtime SA access
 gcloud secrets add-iam-policy-binding fivetran-api-key \
-  --member="serviceAccount:service-910787152095@gcp-sa-aiplatform-re.iam.gserviceaccount.com" \
+  --member="serviceAccount:service-YOUR_PROJECT_NUMBER@gcp-sa-aiplatform-re.iam.gserviceaccount.com" \
   --role="roles/secretmanager.secretAccessor"
 gcloud secrets add-iam-policy-binding fivetran-api-secret \
-  --member="serviceAccount:service-910787152095@gcp-sa-aiplatform-re.iam.gserviceaccount.com" \
+  --member="serviceAccount:service-YOUR_PROJECT_NUMBER@gcp-sa-aiplatform-re.iam.gserviceaccount.com" \
   --role="roles/secretmanager.secretAccessor"
 
 # Deploy agent (5-10 min)
-uvx google-agents-cli deploy --project api-project-910787152095
+uvx google-agents-cli deploy --project YOUR_GCP_PROJECT_ID
 ```
 
 ## Key Implementation Notes
