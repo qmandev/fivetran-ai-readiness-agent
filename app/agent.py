@@ -58,7 +58,11 @@ os.environ["GOOGLE_CLOUD_LOCATION"] = "global"
 os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "True"
 
 from .tools import bigquery_query  # noqa: E402  — must follow auth bootstrap
-from .tools.bigquery_query import list_proposed_drift_events  # noqa: E402
+from .tools.bigquery_query import (  # noqa: E402
+    check_freshness_sla,
+    list_freshness_status,
+    list_proposed_drift_events,
+)
 
 INSTRUCTION = (Path(__file__).parent / "system_instructions.md").read_text()
 
@@ -216,6 +220,8 @@ root_agent = Agent(
     instruction=INSTRUCTION,
     tools=[
         list_proposed_drift_events,
+        check_freshness_sla,
+        list_freshness_status,
         approve_drift,
         reject_drift,
         mark_drift_applied,

@@ -223,13 +223,18 @@ def _patch_pipeline_deps(
     prior_columns: list | None = None,
     diff_changes: list | None = None,
     classify_response: Classification | None = None,
+    destination_schema: str = "public",
 ):
     """Install stubs on the deps the pipeline calls. Captures every call
     so tests can assert behavior."""
     calls = SimpleNamespace(
-        write_snapshot=[], load_columns=[], diff_columns=[],
+        write_sync_log=[], write_snapshot=[], load_columns=[], diff_columns=[],
         classify=[], insert_drift_event=[],
     )
+    # Stub the resolver so tests never make real Fivetran API calls.
+    monkeypatch.setattr(wr, "resolve_destination_schema", lambda cid: destination_schema)
+    monkeypatch.setattr(wr.bigquery_query, "write_sync_log",
+                        lambda row: calls.write_sync_log.append(row))
     monkeypatch.setattr(wr.snapshot_diff, "capture_and_gate",
                         lambda cid, ds: gate_result)
     monkeypatch.setattr(wr.bigquery_query, "write_snapshot",
@@ -246,6 +251,55 @@ def _patch_pipeline_deps(
     monkeypatch.setattr(wr.bigquery_query, "insert_drift_event",
                         lambda ev: calls.insert_drift_event.append(ev))
     return calls
+
+
+def test_pipeline_writes_sync_log_before_hash_gate(monkeypatch):
+    """sync_log must be written for EVERY successful sync_end, including those
+    where the schema hash is unchanged (cheap exit). This is the invariant that
+    makes sync_log the authoritative freshness data source."""
+    gate = GateResult(
+        changed=False,
+        current_columns=[_col("customer_id", "INT64", 1)],
+        current_hash="hash-unchanged",
+        prior_snapshot={"snapshot_id": "prev", "content_hash": "hash-unchanged"},
+    )
+    calls = _patch_pipeline_deps(monkeypatch, gate)
+    wr._run_detection_pipeline({
+        "connector_id": "c1",
+        "sync_id": "sync-xyz",
+        "created": "2026-05-31T10:00:00.000Z",
+    })
+    assert len(calls.write_sync_log) == 1
+    row = calls.write_sync_log[0]
+    assert row["connection_id"] == "c1"
+    assert row["sync_id"] == "sync-xyz"
+    assert row["synced_at"] == "2026-05-31T10:00:00.000Z"
+    assert "log_id" in row
+    assert "received_at" in row
+    # Cheap exit — snapshot/diff/events not written
+    assert calls.write_snapshot == []
+    assert calls.insert_drift_event == []
+
+
+def test_pipeline_sync_log_write_failure_does_not_abort_pipeline(monkeypatch):
+    """A write_sync_log failure must not prevent the rest of the detection
+    pipeline from running — freshness logging is best-effort."""
+    gate = GateResult(
+        changed=True,
+        current_columns=[_col("customer_id", "INT64", 1)],
+        current_hash="hash-after",
+        prior_snapshot=None,
+    )
+
+    def exploding_write_sync_log(row):
+        raise RuntimeError("BQ streaming insert failed")
+
+    calls = _patch_pipeline_deps(monkeypatch, gate)
+    monkeypatch.setattr(wr.bigquery_query, "write_sync_log", exploding_write_sync_log)
+    # Must NOT raise — pipeline continues after sync_log failure.
+    wr._run_detection_pipeline({"connector_id": "c1"})
+    # Bootstrap snapshot is still written despite sync_log failure.
+    assert len(calls.write_snapshot) == 1
 
 
 def test_pipeline_cheap_exit_when_hash_unchanged(monkeypatch):
@@ -362,6 +416,8 @@ def test_pipeline_continues_after_per_change_classify_error(monkeypatch):
         return Classification(change_type="TYPE_PROMOTION", confidence=0.8,
                               rationale="ok", remediation_sql="VIEW...")
 
+    monkeypatch.setattr(wr, "resolve_destination_schema", lambda cid: "public")
+    monkeypatch.setattr(wr.bigquery_query, "write_sync_log", lambda row: None)
     monkeypatch.setattr(wr.snapshot_diff, "capture_and_gate",
                         lambda cid, ds: gate)
     monkeypatch.setattr(wr.bigquery_query, "write_snapshot",
@@ -388,6 +444,9 @@ def test_pipeline_swallows_top_level_exception(monkeypatch):
     must not propagate out of the background thread — it'd silently kill
     the thread otherwise. The pipeline log.exceptions and returns; the
     NEXT sync_end retries the whole flow (convergent design)."""
+    monkeypatch.setattr(wr, "resolve_destination_schema", lambda cid: "public")
+    monkeypatch.setattr(wr.bigquery_query, "write_sync_log", lambda row: None)
+
     def boom(cid, ds):
         raise RuntimeError("BQ unavailable")
     monkeypatch.setattr(wr.snapshot_diff, "capture_and_gate", boom)

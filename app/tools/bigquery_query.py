@@ -58,6 +58,11 @@ def _state_dataset() -> str:
     return os.environ.get("BQ_STATE_DATASET", "agent_state")
 
 
+def _default_sla_hours() -> float:
+    """SLA threshold in hours. Read at call time so tests can monkeypatch."""
+    return float(os.environ.get("FRESHNESS_SLA_HOURS", "24"))
+
+
 # ── Pure helpers (no BQ client; unit-testable) ─────────────────────────────
 
 def _columns_query(project: str, dataset: str) -> str:
@@ -290,6 +295,110 @@ def update_drift_event(drift_id: str, **updates: Any) -> None:
     )
     cfg = bigquery.QueryJobConfig(query_parameters=params)
     _client().query(sql, location=BQ_LOCATION, job_config=cfg).result()
+
+
+def write_sync_log(log_row: dict) -> None:
+    """Append one sync_log row via streaming insert (append-only; no lifecycle
+    updates needed, so the streaming-buffer DML restriction is irrelevant).
+
+    log_row must have: log_id, connection_id, sync_id, synced_at, received_at.
+    """
+    client = _client()
+    ref = f"{_project()}.{_state_dataset()}.sync_log"
+    errors = client.insert_rows_json(ref, [log_row])
+    if errors:
+        raise RuntimeError(f"insert into sync_log failed: {errors}")
+
+
+def check_freshness_sla(
+    connection_id: str, sla_hours: float | None = None
+) -> dict:
+    """Check whether a Fivetran connection's most recent sync is within SLA.
+
+    Returns a dict:
+      connection_id     – the connection checked
+      last_synced_at    – ISO timestamp of the last successful sync, or None
+      hours_since_sync  – float hours since last sync, or None
+      sla_hours         – the threshold used for this check
+      status            – 'OK', 'STALE', or 'NEVER_SYNCED'
+
+    'OK': last sync is within sla_hours of now.
+    'STALE': more than sla_hours have elapsed since the last sync.
+    'NEVER_SYNCED': no sync_log rows exist for this connection yet.
+
+    sla_hours defaults to the FRESHNESS_SLA_HOURS env var (default 24).
+    Pass an explicit value to override per-call without changing the global
+    default (useful when different downstream consumers have different SLAs).
+    """
+    from google.cloud import bigquery  # noqa: PLC0415
+    threshold = sla_hours if sla_hours is not None else _default_sla_hours()
+    sql = (
+        "SELECT connection_id, "
+        "MAX(synced_at) AS last_synced_at, "
+        "TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), MAX(synced_at), SECOND) / 3600.0 "
+        "  AS hours_since_sync "
+        f"FROM {_state_table_fqn('sync_log')} "
+        "WHERE connection_id = @connection_id "
+        "GROUP BY connection_id"
+    )
+    cfg = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("connection_id", "STRING", connection_id),
+    ])
+    rows = list(_client().query(sql, location=BQ_LOCATION, job_config=cfg).result())
+    if not rows:
+        return {
+            "connection_id": connection_id,
+            "last_synced_at": None,
+            "hours_since_sync": None,
+            "sla_hours": threshold,
+            "status": "NEVER_SYNCED",
+        }
+    row = rows[0]
+    hours = float(row["hours_since_sync"])
+    last_synced = row["last_synced_at"]
+    return {
+        "connection_id": connection_id,
+        "last_synced_at": last_synced.isoformat() if hasattr(last_synced, "isoformat") else str(last_synced),
+        "hours_since_sync": round(hours, 2),
+        "sla_hours": threshold,
+        "status": "OK" if hours <= threshold else "STALE",
+    }
+
+
+def list_freshness_status(sla_hours: float | None = None) -> list[dict]:
+    """Return freshness status for every connection that has logged at least
+    one successful sync. Connections that have never fired a sync_end webhook
+    are not visible here — check Fivetran's own connection list for those.
+
+    Each element: connection_id, last_synced_at, hours_since_sync, sla_hours,
+    status ('OK' or 'STALE'). Sorted by hours_since_sync descending so the
+    stalest connections appear first.
+
+    sla_hours defaults to FRESHNESS_SLA_HOURS env var (default 24).
+    """
+    threshold = sla_hours if sla_hours is not None else _default_sla_hours()
+    sql = (
+        "SELECT connection_id, "
+        "MAX(synced_at) AS last_synced_at, "
+        "TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), MAX(synced_at), SECOND) / 3600.0 "
+        "  AS hours_since_sync "
+        f"FROM {_state_table_fqn('sync_log')} "
+        "GROUP BY connection_id "
+        "ORDER BY hours_since_sync DESC"
+    )
+    rows = _client().query(sql, location=BQ_LOCATION).result()
+    result = []
+    for row in rows:
+        hours = float(row["hours_since_sync"])
+        last_synced = row["last_synced_at"]
+        result.append({
+            "connection_id": row["connection_id"],
+            "last_synced_at": last_synced.isoformat() if hasattr(last_synced, "isoformat") else str(last_synced),
+            "hours_since_sync": round(hours, 2),
+            "sla_hours": threshold,
+            "status": "OK" if hours <= threshold else "STALE",
+        })
+    return result
 
 
 def _drift_event_placeholder(field: str) -> str:

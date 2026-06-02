@@ -1,0 +1,13 @@
+name: fivetran-ai-readiness-agent
+description: Schema-drift downstream resolver for Fivetran-loaded data
+base_template: adk
+agent_directory: app
+generated_at: '2026-05-17T21:48:05.870158+00:00'
+acli_version: 0.2.1
+create_params:
+  deployment_target: agent_runtime
+  session_type: none
+  cicd_runner: skip
+  include_data_ingestion: false
+  datastore: none
+  agent_guidance_filename: CLAUDE.md
