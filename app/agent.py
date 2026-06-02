@@ -63,6 +63,20 @@ from .tools.bigquery_query import (  # noqa: E402
     list_freshness_status,
     list_proposed_drift_events,
 )
+from .tools.readiness_score import (  # noqa: E402
+    analyze_drift_volatility,
+    list_readiness_scores,
+    score_ai_readiness,
+)
+from .tools.schema_docs import generate_schema_docs  # noqa: E402
+from .tools.sensitivity_classifier import (  # noqa: E402
+    classify_column_sensitivity,
+    list_sensitive_columns,
+)
+from .tools.use_case_auditor import audit_use_case_coverage  # noqa: E402
+from .tools.json_flattener import detect_json_columns, generate_json_flattener  # noqa: E402
+from .tools.entity_detector import detect_entity_overlaps  # noqa: E402
+from .tools.failure_diagnosis import diagnose_sync_failures  # noqa: E402
 
 INSTRUCTION = (Path(__file__).parent / "system_instructions.md").read_text()
 
@@ -226,6 +240,21 @@ root_agent = Agent(
         reject_drift,
         mark_drift_applied,
         mark_drift_verified,
+        # v3 Phase 1 — AI-readiness scoring + drift volatility
+        score_ai_readiness,
+        list_readiness_scores,
+        analyze_drift_volatility,
+        # v3 Phase 2 — schema docs, sensitivity classification, use-case auditing
+        generate_schema_docs,
+        classify_column_sensitivity,
+        list_sensitive_columns,
+        audit_use_case_coverage,
+        # v3 Phase 3 — JSON flattener + entity/silo detector
+        detect_json_columns,
+        generate_json_flattener,
+        detect_entity_overlaps,
+        # v3 Phase 4 — pipeline failure diagnosis
+        diagnose_sync_failures,
         fivetran_mcp_reads,
         fivetran_mcp_writes,
     ],

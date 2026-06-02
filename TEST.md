@@ -4,11 +4,13 @@ Live test evidence, empirical findings, and verification records for the Fivetra
 
 ---
 
-## Unit Test Suite — 104/104 Passing (v2, 2026-05-31)
+## Unit Test Suite — 251/251 Passing (v3 + limitation fixes, 2026-06-02)
 
 ```bash
 uv run pytest tests/unit/ -v
 ```
+
+### v1/v2 modules (104 tests)
 
 | File | Count | Coverage focus |
 |---|---|---|
@@ -19,11 +21,29 @@ uv run pytest tests/unit/ -v
 | `tests/unit/test_connection_resolver.py` | **15** | v2 — `_fetch_schema` (no creds, partial creds, network error, missing field, `config.schema` success, `schema_prefix` fallback, priority between fields, correct Basic-auth header, correct URL); `resolve_destination_schema` (env-var fallback, default `"public"`, cache hit, fallback not cached, two independent connections) |
 | `tests/unit/test_dummy.py` | 1 | Template placeholder (kept as-is) |
 
-**Environment:** Python 3.13.7 (auto-provisioned by uv to satisfy `requires-python = ">=3.11,<3.14"`), `google-adk>=1.15,<2`, `google-cloud-bigquery>=3`, `google-genai`. Two non-actionable dependency warnings: `authlib.jose` deprecation (transitive), `[EXPERIMENTAL] PLUGGABLE_AUTH` (ADK feature flag).
+### v3 modules (137 tests)
+
+| File | Count | Coverage focus |
+|---|---|---|
+| `tests/unit/test_readiness_score.py` | **28** | `_extract_json` (plain + fenced + error), grade order constant, per-signal collectors (`_freshness_signal`, `_drift_stability_signal`, `_type_suitability_signal`, `_naming_coherence_signal`) each with OK/STALE/empty paths; `score_ai_readiness` grade extraction + signals passthrough + bad-JSON fallback + lowercase grade normalisation; `list_readiness_scores` sorted worst-first + empty `sync_log`; `analyze_drift_volatility` BQ counts preserved + stability class merged + fleet summary + no-events short-circuit + bad-Gemini fallback + custom `days` |
+| `tests/unit/test_schema_docs.py` | **7** | Result structure (connection_id, dataset, tables keys), all columns present, `data_type` preserved, multiple tables each get one Gemini call, bad-JSON → empty `description`, empty schema → `{}`, missing column in Gemini response → `""` |
+| `tests/unit/test_sensitivity_classifier.py` | **15** | Sensitivity rank ordering (PII < FINANCIAL < HEALTH < SAFE), `classify_column_sensitivity`: all columns returned + correct classes + masking strategies + `connection_id` on each row + empty schema → `[]` + bad-JSON → `[]` + lowercase class normalised to uppercase; `list_sensitive_columns`: default PII-only filter + FINANCIAL includes PII + SAFE returns all + sorted PII-first + empty `sync_log` → `[]` + two connections combined |
+| `tests/unit/test_use_case_auditor.py` | **14** | `_fuzzy_match`: exact, partial, underscore-stripped, no-match, empty; `audit_use_case_coverage`: use-case echoed, `coverage_pct` = 66.7% (4/6), covered/missing fields, connector suggestions in missing, required entities returned, narrative present, bad Phase-A JSON → `required_entities=[]` + 0.0 coverage, bad Phase-B JSON → fuzzy fallback, empty `sync_log`, zero fields → early return |
+| `tests/unit/test_json_flattener.py` | **28** | `_detect_reason`: JSON type (case-insensitive), structured name patterns; `_STRUCTURED_NAME_RE`: 11 matching cases (incl. embedded names like `user_metadata`, `event_payload`, `REQUEST_CONTEXT`) + 4 non-matching; `detect_json_columns`: JSON type found, STRING payload found, safe strings skipped, `connection_id` on rows, multiple tables, table key present; `generate_json_flattener`: view name, view SQL, `deploy_via_mcp=True`, `estimated_columns` from structure, audit row written with correct fields, insert failure non-fatal, empty sample rows → fallback structure, invalid JSON samples → fallback |
+| `tests/unit/test_entity_detector.py` | **28** | Return shape (list), `entity_name`, `confidence`, occurrences (2 connections), join keys, split-truth conflicts; BQ write: `entity_map` written, 2 rows (one per occurrence), row fields (entity_name, join_key_col, confidence, detection_id, detected_at); insert failure non-fatal; edge cases: empty `sync_log` → `[]`, bad Gemini JSON → `[]`, empty Gemini list → `[]`, all required keys present; **single-connection mode**: Gemini IS called with catalog prompt, `analysis_mode="single_connection"`, zero connections → `[]`; **multi-connection mode**: `analysis_mode="cross_connection"` |
+| `tests/unit/test_failure_diagnosis.py` | **27** | `_severity_from_count`: CRITICAL/HIGH/MEDIUM/LOW/zero; no-failures path: `status="no_failures"`, Gemini NOT called, connection_id in message, `period_days` in result; with-failures path: correct `failure_count`, top errors ranked by frequency, top errors capped at 5, severity from Gemini, severity fallback on bad Gemini, `recommended_actions` list, diagnosis string, `connection_id`/`period_days` in result, `source="sync_failure_log"`; edge cases: NULL error_code → `"UNKNOWN"`, invalid Gemini severity → count-based fallback, `sample_message` captured; **API fallback path**: `_fetch_connector_status` called when log empty, healthy API → `no_failures` with state in message, error state → Gemini called + `source="fivetran_api"`, tasks present → Gemini called, API unreachable → graceful `no_failures` |
+
+**Environment:** Python 3.13.7, `google-adk>=1.15,<2`, `google-cloud-bigquery>=3`, `google-genai`. Two non-actionable dependency warnings: `authlib.jose` deprecation (transitive), `[EXPERIMENTAL] PLUGGABLE_AUTH` (ADK feature flag).
+
+### Bugs found and fixed during testing
+
+**`_STRUCTURED_NAME_RE` word-boundary false negative.** Initial regex used `\b` anchors: `r"\b(metadata|properties|…|payload|…|context)\b"`. Python's `\b` treats `_` as a word character, so `\bpayload\b` does not match `user_payload` (the `_` before `payload` is a word char — no boundary). The parametrized test `test_structured_name_re_matches[user_metadata]` caught this immediately. Fix: removed `\b` anchors, using plain case-insensitive substring search.
+
+**`test_detect_entity_overlaps_single_connection_skips_gemini` stale assertion.** When the single-connection catalog mode was added, this pre-existing test asserted `calls == []` (Gemini must NOT be called). After the fix, Gemini IS called (with the catalog prompt), so the assertion was inverted. The test was renamed to `test_detect_entity_overlaps_single_connection_uses_catalog_prompt` and the assertion updated to `assert "single Fivetran connection" in calls[0]` — verifying the correct prompt was used, not a stale expectation from the old short-circuit.
 
 ---
 
-## Eval Suite — 7/7 Passing (v2, 2026-05-31)
+## Eval Suite — 7/7 Passing (v2, 2026-05-31, v3 eval cases pending)
 
 ```bash
 uvx google-agents-cli eval run --evalset tests/eval/evalsets/drift_trajectories.evalset.json

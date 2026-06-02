@@ -157,6 +157,123 @@ Initially skipped for the v1 hackathon submission due to `agents-cli 0.1.3 → 0
 
 ---
 
+## v3 AI-Readiness Tools — Design Notes (2026-06-02)
+
+Eight Gemini-powered tools added across four phases. All follow the exact patterns
+established in v1/v2 — no new dependencies, no new ADK patterns.
+
+### Shared helper `_fetch_schema_for_connection` (bigquery_query.py)
+
+Seven of the eight v3 tools need `INFORMATION_SCHEMA.COLUMNS` for a given connection.
+Rather than each tool re-implementing the query, a single helper resolves the dataset
+via `connection_resolver`, queries INFORMATION_SCHEMA, and returns
+`{schema.table_name: [ColumnRecord]}`. This avoids seven copies of the same BQ round-trip
+and makes the query logic testable in one place.
+
+### `model_fn=` dependency injection on all v3 tools
+
+All v3 Gemini call sites accept `model_fn=_call_gemini` as a keyword-only argument.
+Tests inject a lambda stub — the entire prompt-build / JSON-parse / return-shape pipeline
+is exercised offline without burning Gemini credits. This pattern was established in
+`classify_drift.py` and extended uniformly across v3.
+
+### `_extract_json` / `_call_gemini` — defined once, imported everywhere
+
+`readiness_score.py` is the canonical home for `_call_gemini`, `_extract_json`, and
+`CLASSIFIER_MODEL`. All other v3 tool files import from there. Single source of truth
+for the Gemini client config and fence-stripping logic.
+
+### Graceful degradation on bad Gemini JSON (all v3 tools)
+
+Every v3 tool wraps its `_extract_json` call in `try/except (json.JSONDecodeError, AttributeError)`:
+- `score_ai_readiness` → `grade="?"`, raw response as narrative
+- `analyze_drift_volatility` → `stability_class="UNKNOWN"` per connection
+- `generate_schema_docs` → empty `description=""` per column
+- `classify_column_sensitivity` → returns `[]`
+- `audit_use_case_coverage` → falls back to pre-computed fuzzy coverage map
+- `detect_entity_overlaps` → returns `[]`
+- `diagnose_sync_failures` → `severity` from count heuristic, empty `recommended_actions`
+
+### `_STRUCTURED_NAME_RE` — no `\b` word-boundary anchors
+
+The regex for detecting structured-payload column names (`metadata`, `payload`, etc.) uses
+plain case-insensitive substring matching, not `\b` word boundaries. Python's `\b` treats
+`_` as a word character, so `\bpayload\b` would not match `user_payload` or `event_payload`.
+This was caught by unit tests (`test_json_flattener.py::test_structured_name_re_matches`).
+
+### `diagnose_sync_failures` — short-circuit on empty table
+
+The tool returns `status="no_failures"` immediately when `sync_failure_log` is empty,
+without calling Gemini. This is correct and cost-defensive: the table starts empty for
+all users until `scripts/setup_external_logging.sh` is run. Burning a Gemini call on an
+empty table would produce a nonsense response.
+
+### `detect_entity_overlaps` — minimum two connections
+
+Entity overlap detection is meaningless with a single source. The tool short-circuits to
+`[]` when `sync_log` has fewer than two distinct `connection_id` values, avoiding a
+Gemini call that would produce an empty or hallucinated response.
+
+### Streaming insert for append-only v3 state tables
+
+`json_flattener_log` and `entity_map` use streaming insert (`insert_rows_json`), not
+parameterized INSERT. These tables are append-only — rows are never updated after insert —
+so the streaming buffer's 90-minute DML lag is irrelevant. `drift_events` still uses
+parameterized INSERT because its lifecycle updates (`UPDATE … SET remediation_status=…`)
+must be available immediately.
+
+### `resolve_destination_schema` — lazy import only (Agent Runtime packaging constraint)
+
+`ingest` is NOT in `pyproject.toml`'s `packages = ["app", "frontend"]` list and has no
+`__init__.py`. The `agents-cli deploy` command packages only the declared packages —
+`ingest.webhook_receiver.connection_resolver` does not exist in the agent container.
+
+**Any module-level `from ingest…` import in an `app/tools/` file causes an `ImportError`
+at agent startup, silently failing the Reasoning Engine update on Vertex AI.**
+
+The correct pattern (used everywhere) is a lazy import inside the function body:
+
+```python
+def my_tool(connection_id: str) -> dict:
+    from ingest.webhook_receiver.connection_resolver import resolve_destination_schema  # noqa: PLC0415
+    dataset = resolve_destination_schema(connection_id)
+```
+
+**Test patch target:** with a lazy import, monkeypatch must target the source module, not a
+re-export that no longer exists at the tool module level:
+
+```python
+# Correct — patches the source
+monkeypatch.setattr("ingest.webhook_receiver.connection_resolver.resolve_destination_schema", lambda _: "ds")
+
+# Wrong — name doesn't exist at module level with lazy import
+monkeypatch.setattr("app.tools.schema_docs.resolve_destination_schema", ...)
+```
+
+This was discovered when `schema_docs.py` and `json_flattener.py` both had module-level
+imports that caused the v3 Agent Runtime deploy to fail with `"The Reasoning Engine failed
+to be updated."` The operation was created on Vertex AI (manifest accepted) but the
+container crashed at startup — distinguishing an import error from a manifest version
+incompatibility. Fixed 2026-06-02: both imports moved to function body; test patches
+updated to the `ingest.webhook_receiver.connection_resolver` path.
+
+### `sensitivity_classifier.py` — one Gemini call per connection, not per table
+
+All columns from all tables in a connection are batched into a single Gemini prompt
+regardless of how many tables exist. This keeps the tool's Gemini cost O(connections),
+not O(tables). The prompt includes `{table: ..., column: ..., data_type: ...}` tuples so
+Gemini can apply table-context when distinguishing `orders.amount` (FINANCIAL) from
+`blog_posts.amount` (SAFE).
+
+### `use_case_auditor.py` — fuzzy pre-coverage as Phase B fallback
+
+Before calling Gemini Phase B, the auditor pre-computes a fuzzy coverage map using
+token-based substring matching. If Phase B's JSON is malformed, the fallback uses the
+fuzzy map to populate `covered` and `missing`, ensuring the function always returns a
+structurally valid response even when the LLM fails.
+
+---
+
 ## `agents-cli scaffold upgrade` Notes (2026-05-31)
 
 - `agents-cli scaffold upgrade` partially succeeded — manifest migrated but template comparison failed with "Project name exceeds 26 characters". Functional result is correct; the 26-char limit only affects the cosmetic diff-generation step.

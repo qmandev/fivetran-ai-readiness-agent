@@ -365,6 +365,24 @@ def check_freshness_sla(
     }
 
 
+def _fetch_schema_for_connection(connection_id: str) -> dict[str, list[ColumnRecord]]:
+    """Return {table_schema.table_name: [ColumnRecord]} for all columns in the connection's dataset.
+
+    Resolves the BQ dataset name via the Fivetran REST API (connection_resolver),
+    then queries INFORMATION_SCHEMA.COLUMNS. Used by v3 tools that need the
+    full schema without duplicating the INFORMATION_SCHEMA query logic.
+    """
+    from ingest.webhook_receiver.connection_resolver import resolve_destination_schema  # noqa: PLC0415
+    dataset = resolve_destination_schema(connection_id)
+    sql = _columns_query(_project(), dataset)
+    rows = _client().query(sql, location=BQ_LOCATION).result()
+    result: dict[str, list[ColumnRecord]] = {}
+    for r in rows:
+        col = _row_to_column_record(r)
+        result.setdefault(f"{col.table_schema}.{col.table_name}", []).append(col)
+    return result
+
+
 def list_freshness_status(sla_hours: float | None = None) -> list[dict]:
     """Return freshness status for every connection that has logged at least
     one successful sync. Connections that have never fired a sync_end webhook

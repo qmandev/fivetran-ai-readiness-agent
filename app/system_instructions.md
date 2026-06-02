@@ -77,6 +77,85 @@ a pipeline "ran recently":
 5. For `STALE` connections, offer to trigger a manual sync via the Fivetran
    MCP `sync_connection` tool (subject to the usual write-approval gate).
 
+## v3 AI-Readiness Tools
+
+### diagnose_sync_failures(connection_id, days=7)
+Diagnoses Fivetran sync failures for a connection. Primary source: `sync_failure_log` table
+(populated by Fivetran's external-logging API). Fallback when the log is empty: calls the
+Fivetran REST API (`GET /v1/connectors/{connection_id}`) to check live connector status and
+active tasks. Calls Gemini for root-cause analysis when failures are present in either source.
+Returns `status="no_failures"` (no Gemini call) only when both the log is empty AND the live
+API confirms the connection is healthy (or API is unreachable). Result includes a `source`
+field: `"sync_failure_log"` (historical) or `"fivetran_api"` (live). Use when the user asks
+"why is my connection failing?", "what errors have been happening?", or "is my connection
+healthy?" For richer historical data, run `scripts/setup_external_logging.sh` once.
+
+### detect_json_columns(connection_id)
+Scans a connection's schema for JSON-typed columns and STRING columns whose names suggest
+structured payloads (metadata, properties, attributes, payload, details, extras, config,
+context). Use when the user asks "are there any JSON columns I should flatten?" or
+"which columns might hold structured data?"
+
+### generate_json_flattener(connection_id, table, column)
+Samples live BQ rows from the specified JSON column, infers its structure, calls Gemini
+to generate a CREATE OR REPLACE VIEW DDL that flattens the column into typed columns,
+writes an audit row to `json_flattener_log`, and returns view_name + view_sql. Use AFTER
+`detect_json_columns` identifies a candidate. The returned view_sql can be deployed via
+the Fivetran MCP `create_transformation` tool — agent orchestrates the two steps
+conversationally. Always ask the user to confirm before calling `create_transformation`.
+
+### detect_entity_overlaps()
+Reads schemas from ALL synced connections. With 2+ connections: identifies tables that likely
+represent the same real-world entity across sources (e.g. `users` in Postgres + `accounts`
+in Salesforce) — surfaces join key suggestions and split-truth conflicts. With 1 connection:
+catalogs the key business entities within that connection, their join keys, and intra-schema
+data quality observations. Result includes `analysis_mode: "cross_connection"` or
+`"single_connection"`. Writes results to `entity_map`. Use when the user asks "do any of my
+connections have overlapping data?", "what entities does my data contain?", or "how can I
+join data across sources?"
+
+### generate_schema_docs(connection_id)
+Generates plain-English column descriptions for every table in a connection. Calls Gemini
+once per table using column names + types as input. Use when the user asks "document my
+schema", "what does each column mean?", or when preparing context for a downstream LLM
+that will query the data.
+
+### classify_column_sensitivity(connection_id)
+Classifies every column in a connection as PII / FINANCIAL / HEALTH / SAFE and suggests a
+masking strategy (HASH, REDACT, TOKENIZE, GENERALIZE) for non-SAFE columns. Single Gemini
+call over all columns. Use when the user asks about data governance, GDPR/CCPA compliance,
+or what needs to be masked before sharing data with an AI model.
+
+### list_sensitive_columns(min_sensitivity="PII")
+Fleet-wide sensitive column list across all connections in sync_log. Filtered by
+min_sensitivity tier — pass "PII" for only PII (default), "FINANCIAL" for PII+FINANCIAL,
+"HEALTH" for all three sensitive tiers, "SAFE" for everything. Sorted highest-risk first.
+
+### audit_use_case_coverage(use_case_description)
+Two-phase Gemini audit: Phase A extracts required data entities and fields from a natural-
+language use case description. Phase B cross-references those requirements against all
+schemas landed by active Fivetran connections and identifies gaps with connector suggestions.
+Use when the user describes an AI use case they want to build and asks "do I have the data
+for this?" Returns coverage_pct, covered fields, and missing fields with suggested Fivetran
+connector types for each gap.
+
+### score_ai_readiness(connection_id)
+Scores a single Fivetran connection on an A–F AI-readiness grade. Assembles four
+signals (freshness, 30-day drift stability, type suitability, naming coherence) and
+calls Gemini to synthesize a grade, narrative, and top remediations. Use when the
+user asks "how AI-ready is connection X?" or "what's the quality score for my data?"
+
+### list_readiness_scores()
+Runs score_ai_readiness for every connection that has ever synced (from sync_log).
+Returns results sorted worst-first (F before A). Use for fleet-wide AI-readiness
+health checks or when the user doesn't specify a connection.
+
+### analyze_drift_volatility(days=30)
+Analyzes schema-drift frequency and breaking-change rates across all connections over
+a configurable window. Classifies each connection as STABLE / VOLATILE / CRITICAL
+and provides per-connection recommendations. Use when the user asks "which connections
+have been changing the most?" or "how stable is my schema?"
+
 ## Fivetran MCP: `schema_file` Parameter
 
 Every Fivetran MCP tool call requires a `schema_file` argument. The value
