@@ -4,16 +4,20 @@
 > classifying blast radius, gating every fix behind human approval, and surfacing
 > freshness SLA status across your entire connection fleet.
 
-**v1 capability:** Schema-Drift Downstream Impact Resolver — detects every schema
-change the moment Fivetran lands it, classifies blast radius with Gemini, and gates
-every remediation behind explicit human approval via Fivetran's `transformations` API.
+An AI agent that keeps Fivetran-loaded warehouse data fit for downstream AI consumers.
+Three core capabilities, all live:
 
-**v2 capabilities (2026-05-31):**
+- **Schema-drift detection & HITL remediation** — detects every schema change the moment
+  Fivetran lands it (RENAME / TYPE_PROMOTION / REORDER / NEW_FIELD / DEPRECATION),
+  classifies blast radius with Gemini Flash, generates VIEW-shim remediation SQL, and
+  gates every write action behind explicit human approval via Fivetran's `transformations` API.
 - **Multi-connection support** — each Fivetran connection resolves to its own BQ dataset
-  via the Fivetran REST API (no more single hardcoded `BQ_DESTINATION_DATASET`).
+  via the Fivetran REST API; results are cached in-process. Falls back to
+  `BQ_DESTINATION_DATASET` so single-connection setups work with zero config change.
 - **Freshness SLA monitor** — `check_freshness_sla` and `list_freshness_status` tools
   let you ask "is my data fresh enough?" for a single connection or your whole fleet.
-  Every successful `sync_end` is recorded in `sync_log`; threshold via `FRESHNESS_SLA_HOURS`.
+  Every successful `sync_end` is recorded in `sync_log` before the hash gate, so
+  freshness is tracked even when the schema is unchanged. Threshold via `FRESHNESS_SLA_HOURS`.
 
 Built with **Google ADK 1.x** · **Gemini Flash** · **Gemini Enterprise Agent Platform** ·
 **BigQuery** · the official [Fivetran MCP server](https://github.com/fivetran/fivetran-mcp).
