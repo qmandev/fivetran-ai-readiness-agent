@@ -53,7 +53,9 @@ def resolve_destination_schema(connection_id: str) -> str:
         _cache[connection_id] = schema
         return schema
 
-    fallback = os.environ.get("BQ_DESTINATION_DATASET", "public")
+    # `or` (not get's default) so an env var set to an empty string still
+    # falls back to 'public' — get(..., 'public') would return the empty string.
+    fallback = os.environ.get("BQ_DESTINATION_DATASET") or "public"
     log.warning(
         "resolve_destination_schema: API lookup failed for connection=%s; "
         "falling back to BQ_DESTINATION_DATASET=%r",

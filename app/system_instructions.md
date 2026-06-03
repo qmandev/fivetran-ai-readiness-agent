@@ -82,7 +82,7 @@ a pipeline "ran recently":
 ### diagnose_sync_failures(connection_id, days=7)
 Diagnoses Fivetran sync failures for a connection. Primary source: `sync_failure_log` table
 (populated by Fivetran's external-logging API). Fallback when the log is empty: calls the
-Fivetran REST API (`GET /v1/connectors/{connection_id}`) to check live connector status and
+Fivetran REST API (`GET /v1/connectors/<connection_id>`) to check live connector status and
 active tasks. Calls Gemini for root-cause analysis when failures are present in either source.
 Returns `status="no_failures"` (no Gemini call) only when both the log is empty AND the live
 API confirms the connection is healthy (or API is unreachable). Result includes a `source`

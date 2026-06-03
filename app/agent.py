@@ -40,6 +40,8 @@ Action confirmations (Resolved Decision #2 — propose-not-apply default):
   realises the "tool-gated approval step" in the design.
 """
 
+import functools
+import inspect
 import os
 from pathlib import Path
 
@@ -79,6 +81,34 @@ from .tools.entity_detector import detect_entity_overlaps  # noqa: E402
 from .tools.failure_diagnosis import diagnose_sync_failures  # noqa: E402
 
 INSTRUCTION = (Path(__file__).parent / "system_instructions.md").read_text()
+
+
+def _llm_tool(fn):
+    """Expose a tool to ADK with test-injection keyword-only params hidden.
+
+    Several v3 tools take a keyword-only ``model_fn: Callable[[str], str]`` for
+    dependency injection in unit tests. ADK's automatic function-calling schema
+    builder iterates ``inspect.signature(fn).parameters`` and processes
+    KEYWORD_ONLY params (see google/adk/tools/_automatic_function_calling_util.py),
+    but cannot represent a Callable as JSON schema, so it raises
+    "Failed to parse the parameter model_fn". Because that builder honours
+    ``__signature__``, we register the tool with a filtered signature that drops
+    keyword-only params. The wrapper still delegates to ``fn`` (which falls back
+    to its default ``model_fn=_call_gemini``); unit tests call ``fn`` directly
+    with ``model_fn=`` and are unaffected.
+    """
+    sig = inspect.signature(fn)
+    visible = [
+        p for p in sig.parameters.values()
+        if p.kind is not inspect.Parameter.KEYWORD_ONLY
+    ]
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    wrapper.__signature__ = sig.replace(parameters=visible)
+    return wrapper
 
 
 # === Fivetran MCP toolsets ===================================================
@@ -241,20 +271,22 @@ root_agent = Agent(
         mark_drift_applied,
         mark_drift_verified,
         # v3 Phase 1 — AI-readiness scoring + drift volatility
-        score_ai_readiness,
-        list_readiness_scores,
-        analyze_drift_volatility,
+        # Gemini tools wrapped via _llm_tool() to hide their keyword-only
+        # model_fn (DI for tests) from ADK automatic-function-calling schema gen.
+        _llm_tool(score_ai_readiness),
+        _llm_tool(list_readiness_scores),
+        _llm_tool(analyze_drift_volatility),
         # v3 Phase 2 — schema docs, sensitivity classification, use-case auditing
-        generate_schema_docs,
-        classify_column_sensitivity,
-        list_sensitive_columns,
-        audit_use_case_coverage,
+        _llm_tool(generate_schema_docs),
+        _llm_tool(classify_column_sensitivity),
+        _llm_tool(list_sensitive_columns),
+        _llm_tool(audit_use_case_coverage),
         # v3 Phase 3 — JSON flattener + entity/silo detector
-        detect_json_columns,
-        generate_json_flattener,
-        detect_entity_overlaps,
+        detect_json_columns,  # no model_fn — registered directly
+        _llm_tool(generate_json_flattener),
+        _llm_tool(detect_entity_overlaps),
         # v3 Phase 4 — pipeline failure diagnosis
-        diagnose_sync_failures,
+        _llm_tool(diagnose_sync_failures),
         fivetran_mcp_reads,
         fivetran_mcp_writes,
     ],
