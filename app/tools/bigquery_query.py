@@ -372,7 +372,7 @@ def _fetch_schema_for_connection(connection_id: str) -> dict[str, list[ColumnRec
     then queries INFORMATION_SCHEMA.COLUMNS. Used by v3 tools that need the
     full schema without duplicating the INFORMATION_SCHEMA query logic.
     """
-    from ingest.webhook_receiver.connection_resolver import resolve_destination_schema  # noqa: PLC0415
+    from app.tools.connection_resolver import resolve_destination_schema  # noqa: PLC0415
     dataset = resolve_destination_schema(connection_id)
     sql = _columns_query(_project(), dataset)
     rows = _client().query(sql, location=BQ_LOCATION).result()

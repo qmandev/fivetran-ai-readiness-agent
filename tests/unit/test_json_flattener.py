@@ -205,7 +205,7 @@ def _setup_generate(monkeypatch, sample_rows=None, insert_errors=None):
         ]
     }
     monkeypatch.setattr("app.tools.json_flattener._fetch_schema_for_connection", lambda _: schema)
-    monkeypatch.setattr("ingest.webhook_receiver.connection_resolver.resolve_destination_schema", lambda _: "public")
+    monkeypatch.setattr("app.tools.connection_resolver.resolve_destination_schema", lambda _: "public")
     monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "test-project")
     monkeypatch.setenv("BQ_STATE_DATASET", "agent_state")
 

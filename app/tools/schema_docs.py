@@ -60,7 +60,7 @@ def generate_schema_docs(
     tables (dict mapping "schema.table_name" to a list of
     {"column_name": str, "data_type": str, "description": str}).
     """
-    from ingest.webhook_receiver.connection_resolver import resolve_destination_schema  # noqa: PLC0415
+    from app.tools.connection_resolver import resolve_destination_schema  # noqa: PLC0415
     dataset = resolve_destination_schema(connection_id)
     schema = _fetch_schema_for_connection(connection_id)
 

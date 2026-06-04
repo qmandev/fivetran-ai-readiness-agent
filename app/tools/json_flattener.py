@@ -122,7 +122,7 @@ def generate_json_flattener(
     deploy_via_mcp (True — reminder to the agent to use create_transformation).
     """
     from google.cloud import bigquery  # noqa: PLC0415
-    from ingest.webhook_receiver.connection_resolver import resolve_destination_schema  # noqa: PLC0415
+    from app.tools.connection_resolver import resolve_destination_schema  # noqa: PLC0415
     dataset = resolve_destination_schema(connection_id)
 
     # Determine the actual BQ table path from the "schema.table" key

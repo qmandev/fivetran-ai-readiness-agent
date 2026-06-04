@@ -47,7 +47,7 @@ def test_generate_schema_docs_structure(monkeypatch):
     monkeypatch.setattr(
         "app.tools.schema_docs._fetch_schema_for_connection", lambda _: schema
     )
-    monkeypatch.setattr("ingest.webhook_receiver.connection_resolver.resolve_destination_schema", lambda _: "public")
+    monkeypatch.setattr("app.tools.connection_resolver.resolve_destination_schema", lambda _: "public")
 
     gemini_response = [
         {"column_name": "order_id", "description": "Unique identifier for each order."},
@@ -70,7 +70,7 @@ def test_generate_schema_docs_all_columns_present(monkeypatch):
         ]
     }
     monkeypatch.setattr("app.tools.schema_docs._fetch_schema_for_connection", lambda _: schema)
-    monkeypatch.setattr("ingest.webhook_receiver.connection_resolver.resolve_destination_schema", lambda _: "public")
+    monkeypatch.setattr("app.tools.connection_resolver.resolve_destination_schema", lambda _: "public")
 
     gemini_response = [
         {"column_name": "id", "description": "Primary key for the customer."},
@@ -89,7 +89,7 @@ def test_generate_schema_docs_includes_data_type(monkeypatch):
         "public.t": [_make_col("amount", "FLOAT64", table="t")]
     }
     monkeypatch.setattr("app.tools.schema_docs._fetch_schema_for_connection", lambda _: schema)
-    monkeypatch.setattr("ingest.webhook_receiver.connection_resolver.resolve_destination_schema", lambda _: "ds")
+    monkeypatch.setattr("app.tools.connection_resolver.resolve_destination_schema", lambda _: "ds")
 
     gemini_response = [{"column_name": "amount", "description": "Transaction amount."}]
     result = generate_schema_docs("c", model_fn=lambda _: json.dumps(gemini_response))
@@ -105,7 +105,7 @@ def test_generate_schema_docs_multiple_tables(monkeypatch):
         "public.customers": [_make_col("customer_id", "INT64", table="customers")],
     }
     monkeypatch.setattr("app.tools.schema_docs._fetch_schema_for_connection", lambda _: schema)
-    monkeypatch.setattr("ingest.webhook_receiver.connection_resolver.resolve_destination_schema", lambda _: "public")
+    monkeypatch.setattr("app.tools.connection_resolver.resolve_destination_schema", lambda _: "public")
 
     responses = iter([
         json.dumps([{"column_name": "order_id", "description": "Order ID."}]),
@@ -121,7 +121,7 @@ def test_generate_schema_docs_multiple_tables(monkeypatch):
 def test_generate_schema_docs_graceful_on_bad_json(monkeypatch):
     schema = {"public.t": [_make_col("col_a", "STRING", table="t")]}
     monkeypatch.setattr("app.tools.schema_docs._fetch_schema_for_connection", lambda _: schema)
-    monkeypatch.setattr("ingest.webhook_receiver.connection_resolver.resolve_destination_schema", lambda _: "ds")
+    monkeypatch.setattr("app.tools.connection_resolver.resolve_destination_schema", lambda _: "ds")
 
     result = generate_schema_docs("c", model_fn=lambda _: "not valid json")
 
@@ -132,7 +132,7 @@ def test_generate_schema_docs_graceful_on_bad_json(monkeypatch):
 
 def test_generate_schema_docs_empty_schema(monkeypatch):
     monkeypatch.setattr("app.tools.schema_docs._fetch_schema_for_connection", lambda _: {})
-    monkeypatch.setattr("ingest.webhook_receiver.connection_resolver.resolve_destination_schema", lambda _: "ds")
+    monkeypatch.setattr("app.tools.connection_resolver.resolve_destination_schema", lambda _: "ds")
 
     result = generate_schema_docs("c", model_fn=lambda _: "[]")
 
@@ -147,7 +147,7 @@ def test_generate_schema_docs_missing_column_gets_empty_description(monkeypatch)
         ]
     }
     monkeypatch.setattr("app.tools.schema_docs._fetch_schema_for_connection", lambda _: schema)
-    monkeypatch.setattr("ingest.webhook_receiver.connection_resolver.resolve_destination_schema", lambda _: "ds")
+    monkeypatch.setattr("app.tools.connection_resolver.resolve_destination_schema", lambda _: "ds")
 
     # Gemini only returns one of the two columns
     gemini_response = [{"column_name": "col_a", "description": "First column."}]

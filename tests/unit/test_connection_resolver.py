@@ -1,4 +1,4 @@
-"""Unit tests for ingest/webhook_receiver/connection_resolver.py.
+"""Unit tests for app/tools/connection_resolver.py (canonical resolver).
 
 Covers:
   - _fetch_schema: missing/partial creds, network error, missing schema field,
@@ -12,8 +12,8 @@ import json
 
 import pytest
 
-import ingest.webhook_receiver.connection_resolver as resolver_mod
-from ingest.webhook_receiver.connection_resolver import (
+import app.tools.connection_resolver as resolver_mod
+from app.tools.connection_resolver import (
     _fetch_schema,
     resolve_destination_schema,
 )
