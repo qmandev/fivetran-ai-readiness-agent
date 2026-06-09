@@ -4,24 +4,24 @@ Live test evidence, empirical findings, and verification records for the Fivetra
 
 ---
 
-## Unit Test Suite — 251/251 Passing (v3 + limitation fixes, 2026-06-02)
+## Unit Test Suite — 251/251 Passing (Track 3 + limitation fixes, 2026-06-02)
 
 ```bash
 uv run pytest tests/unit/ -v
 ```
 
-### v1/v2 modules (104 tests)
+### Track 1/2 modules (104 tests)
 
 | File | Count | Coverage focus |
 |---|---|---|
 | `tests/unit/test_snapshot_diff.py` | **25** | `exclude_system_columns` (incl. `ctid_fivetran_id` connector variant + defensive substring case), `content_hash` (order-independence, change-detection, empty stability), `diff_columns` (all 5 change types + recall-favoring rename multi-candidate cases + full-table reorder scenario), `capture_and_gate` (bootstrap, hash-match cheap exit, change detection, system-column filter applied before hashing) |
-| `tests/unit/test_bigquery_query.py` | **20** | Pure helpers — region pin, SQL builder shape, state-table FQN with env-config (incl. `GCP_PROJECT_ID` fallback), row converter (YES/NO + bool + ordinal-coercion), JSON helpers, placeholder selection, `update_drift_event` typo-rejection; v2: `_default_sla_hours` (default 24h, env override, fractional) |
+| `tests/unit/test_bigquery_query.py` | **20** | Pure helpers — region pin, SQL builder shape, state-table FQN with env-config (incl. `GCP_PROJECT_ID` fallback), row converter (YES/NO + bool + ordinal-coercion), JSON helpers, placeholder selection, `update_drift_event` typo-rejection; Track 2: `_default_sla_hours` (default 24h, env override, fractional) |
 | `tests/unit/test_classify_drift.py` | **25** | Change-type + model-id constants, prompt builder structure, JSON extraction (plain + fenced + error paths), response parser (happy + 4 error paths), end-to-end `classify()` with injected fake `model_fn` (no live LLM) |
-| `tests/unit/test_webhook_receiver.py` | **18** | `verify_signature`, `handle_request`, `dispatch`, `_run_detection_pipeline` (cheap-exit, bootstrap-no-diff, drift-writes-PROPOSED-events, partial-success per-change, exception-safe top-level); v2: `sync_log` written before hash gate on every sync, `write_sync_log` failure does not abort drift pipeline, `_column_to_dict` |
-| `tests/unit/test_connection_resolver.py` | **15** | v2 — `_fetch_schema` (no creds, partial creds, network error, missing field, `config.schema` success, `schema_prefix` fallback, priority between fields, correct Basic-auth header, correct URL); `resolve_destination_schema` (env-var fallback, default `"public"`, cache hit, fallback not cached, two independent connections) |
+| `tests/unit/test_webhook_receiver.py` | **18** | `verify_signature`, `handle_request`, `dispatch`, `_run_detection_pipeline` (cheap-exit, bootstrap-no-diff, drift-writes-PROPOSED-events, partial-success per-change, exception-safe top-level); Track 2: `sync_log` written before hash gate on every sync, `write_sync_log` failure does not abort drift pipeline, `_column_to_dict` |
+| `tests/unit/test_connection_resolver.py` | **15** | Track 2 — `_fetch_schema` (no creds, partial creds, network error, missing field, `config.schema` success, `schema_prefix` fallback, priority between fields, correct Basic-auth header, correct URL); `resolve_destination_schema` (env-var fallback, default `"public"`, cache hit, fallback not cached, two independent connections) |
 | `tests/unit/test_dummy.py` | 1 | Template placeholder (kept as-is) |
 
-### v3 modules (137 tests)
+### Track 3 modules (137 tests)
 
 | File | Count | Coverage focus |
 |---|---|---|
@@ -43,7 +43,7 @@ uv run pytest tests/unit/ -v
 
 ---
 
-## Eval Suite — 7/7 Passing (v2, 2026-05-31, v3 eval cases pending)
+## Eval Suite — 7/7 Passing (Track 2, 2026-05-31, Track 3 eval cases pending)
 
 ```bash
 uvx google-agents-cli eval run --evalset tests/eval/evalsets/drift_trajectories.evalset.json

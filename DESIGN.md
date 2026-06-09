@@ -98,11 +98,11 @@ Agent Runtime containers do not have `uvx` in PATH. The package is installed as 
 
 `agents-cli deploy` does not package `.env`. The helper reads `os.environ` first, falls back to GCP Secret Manager via the Agent Runtime SA. Fivetran credentials are stored as Secret Manager secrets with `roles/secretmanager.secretAccessor` granted to the Agent Runtime SA.
 
-### v2: Connection resolver with in-process cache
+### Track 2: Connection resolver with in-process cache
 
 `connection_resolver.py` calls `GET /v1/connectors/{connection_id}` (Basic auth) on first encounter and caches the result in-process. Falls back to `BQ_DESTINATION_DATASET` on any error so single-connection setups continue to work with zero config change. Fallback is NOT cached — the next `sync_end` retries the lookup (important: once credentials are populated, resolution recovers automatically).
 
-### v2: `sync_log` written before the hash gate
+### Track 2: `sync_log` written before the hash gate
 
 `write_sync_log` is Step 0 of `_run_detection_pipeline`, before `capture_and_gate`. This makes `sync_log` the authoritative freshness source regardless of whether the schema changed — `schema_snapshots` is only written when the content hash changes.
 
@@ -150,42 +150,42 @@ Fixed in `app/system_instructions.md`: the exact paths for all 13 registered too
 
 ## `agents-cli eval run` — Decision (2026-05-29 → reversed 2026-05-31)
 
-Initially skipped for the v1 hackathon submission due to `agents-cli 0.1.3 → 0.2.1` version mismatch risk. After completing the scaffold upgrade (`agents-cli scaffold upgrade` → `agents-cli-manifest.yaml`), the eval suite runs cleanly:
+Initially skipped for the Track 1 hackathon submission due to `agents-cli 0.1.3 → 0.2.1` version mismatch risk. After completing the scaffold upgrade (`agents-cli scaffold upgrade` → `agents-cli-manifest.yaml`), the eval suite runs cleanly:
 
 - `eval_config.json` criterion changed from list → dict (ADK 1.15+ requirement); `response_match_score` dropped (no `final_response` in cases; ROUGE would score 0.0 against empty string); `tool_trajectory_avg_score=1.0` is the correct signal for a HITL agent.
 - MCP-dependent cases excluded — MCP tools require live Fivetran API + subprocess spawn that exceeds the 10s eval session timeout. MCP tool behavior is validated in the playground instead.
 
 ---
 
-## v3 AI-Readiness Tools — Design Notes (2026-06-02)
+## Track 3 AI-Readiness Tools — Design Notes (2026-06-02)
 
 Eight Gemini-powered tools added across four phases. All follow the exact patterns
-established in v1/v2 — no new dependencies, no new ADK patterns.
+established in Track 1/2 — no new dependencies, no new ADK patterns.
 
 ### Shared helper `_fetch_schema_for_connection` (bigquery_query.py)
 
-Seven of the eight v3 tools need `INFORMATION_SCHEMA.COLUMNS` for a given connection.
+Seven of the eight Track 3 tools need `INFORMATION_SCHEMA.COLUMNS` for a given connection.
 Rather than each tool re-implementing the query, a single helper resolves the dataset
 via `connection_resolver`, queries INFORMATION_SCHEMA, and returns
 `{schema.table_name: [ColumnRecord]}`. This avoids seven copies of the same BQ round-trip
 and makes the query logic testable in one place.
 
-### `model_fn=` dependency injection on all v3 tools
+### `model_fn=` dependency injection on all Track 3 tools
 
-All v3 Gemini call sites accept `model_fn=_call_gemini` as a keyword-only argument.
+All Track 3 Gemini call sites accept `model_fn=_call_gemini` as a keyword-only argument.
 Tests inject a lambda stub — the entire prompt-build / JSON-parse / return-shape pipeline
 is exercised offline without burning Gemini credits. This pattern was established in
-`classify_drift.py` and extended uniformly across v3.
+`classify_drift.py` and extended uniformly across Track 3.
 
 ### `_extract_json` / `_call_gemini` — defined once, imported everywhere
 
 `readiness_score.py` is the canonical home for `_call_gemini`, `_extract_json`, and
-`CLASSIFIER_MODEL`. All other v3 tool files import from there. Single source of truth
+`CLASSIFIER_MODEL`. All other Track 3 tool files import from there. Single source of truth
 for the Gemini client config and fence-stripping logic.
 
-### Graceful degradation on bad Gemini JSON (all v3 tools)
+### Graceful degradation on bad Gemini JSON (all Track 3 tools)
 
-Every v3 tool wraps its `_extract_json` call in `try/except (json.JSONDecodeError, AttributeError)`:
+Every Track 3 tool wraps its `_extract_json` call in `try/except (json.JSONDecodeError, AttributeError)`:
 - `score_ai_readiness` → `grade="?"`, raw response as narrative
 - `analyze_drift_volatility` → `stability_class="UNKNOWN"` per connection
 - `generate_schema_docs` → empty `description=""` per column
@@ -201,20 +201,29 @@ plain case-insensitive substring matching, not `\b` word boundaries. Python's `\
 `_` as a word character, so `\bpayload\b` would not match `user_payload` or `event_payload`.
 This was caught by unit tests (`test_json_flattener.py::test_structured_name_re_matches`).
 
-### `diagnose_sync_failures` — short-circuit on empty table
+### `diagnose_sync_failures` — live API fallback when the log is empty
 
-The tool returns `status="no_failures"` immediately when `sync_failure_log` is empty,
-without calling Gemini. This is correct and cost-defensive: the table starts empty for
-all users until `scripts/setup_external_logging.sh` is run. Burning a Gemini call on an
-empty table would produce a nonsense response.
+The tool queries `sync_failure_log` first (populated by Fivetran's external-logging API).
+When the log is empty — the default state until `scripts/setup_external_logging.sh` is run —
+it does not dead-end: `_fetch_connector_status` calls `GET /v1/connectors/{connection_id}`
+for live connector status. A healthy `sync_state` returns `status="no_failures"` with a
+clear message; an `error`/`broken` state (or active `tasks`) is formatted into synthetic
+error records and sent to Gemini for diagnosis, returning the full result shape with
+`source="fivetran_api"`. Once external-logging is configured, the historical-log path takes
+priority and escalates to Gemini root-cause analysis automatically — same tool, richer data.
+No credentials or an unreachable API degrades gracefully to `status="no_failures"`.
 
-### `detect_entity_overlaps` — minimum two connections
+### `detect_entity_overlaps` — single-connection catalog mode
 
-Entity overlap detection is meaningless with a single source. The tool short-circuits to
-`[]` when `sync_log` has fewer than two distinct `connection_id` values, avoiding a
-Gemini call that would produce an empty or hallucinated response.
+Cross-connection overlap detection needs two sources, but the original `[]` short-circuit
+for a single connection left single-connection users with no output. The tool now branches
+on connection count: **1 connection** → Gemini analyzes the entities *within* that connection
+(naming each entity, its primary table, and the best join key, plus intra-schema quality
+observations) with `analysis_mode="single_connection"`; **2+ connections** → cross-connection
+overlap detection with `analysis_mode="cross_connection"`. The return shape is identical
+across both paths. Zero connections still returns `[]`.
 
-### Streaming insert for append-only v3 state tables
+### Streaming insert for append-only Track 3 state tables
 
 `json_flattener_log` and `entity_map` use streaming insert (`insert_rows_json`), not
 parameterized INSERT. These tables are append-only — rows are never updated after insert —
@@ -251,7 +260,7 @@ monkeypatch.setattr("app.tools.schema_docs.resolve_destination_schema", ...)
 ```
 
 This was discovered when `schema_docs.py` and `json_flattener.py` both had module-level
-imports that caused the v3 Agent Runtime deploy to fail with `"The Reasoning Engine failed
+imports that caused the Track 3 Agent Runtime deploy to fail with `"The Reasoning Engine failed
 to be updated."` The operation was created on Vertex AI (manifest accepted) but the
 container crashed at startup — distinguishing an import error from a manifest version
 incompatibility. Fixed 2026-06-02: both imports moved to function body; test patches
