@@ -66,7 +66,7 @@ Eight new FunctionTools, each addressing a specific AI-readiness gap from Fivetr
 Built with **Google ADK 1.x** · **Gemini Flash** · **Gemini Enterprise Agent Platform** ·
 **BigQuery** · the official [Fivetran MCP server](https://github.com/fivetran/fivetran-mcp).
 
-## Status — Track 3 Complete (2026-06-02)
+## Status — Track 3 Complete (2026-06-08)
 
 | Component | State |
 |---|---|
@@ -94,8 +94,7 @@ Canonical `agents-cli create --prototype --adk` structure. `[gen]` = template-ge
 ```
 pyproject.toml              [gen+port] deps (google-adk 1.x, bigquery, fivetran-mcp,
                                             secret-manager, functions-framework)
-agents-cli-manifest.yaml    [gen+port] deployment target = agent_runtime (us-east1);
-                                       migrated from [tool.agents-cli] by scaffold upgrade
+agents-cli-manifest.yaml    [gen+port] deployment target = agent_runtime (us-east1)
 uv.lock                     [gen] committed for reproducibility
 CLAUDE.md                   [gen] coding-agent guidance
 app/

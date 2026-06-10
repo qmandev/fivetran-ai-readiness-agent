@@ -148,9 +148,9 @@ Fixed in `app/system_instructions.md`: the exact paths for all 13 registered too
 
 ---
 
-## `agents-cli eval run` — Decision (2026-05-29 → reversed 2026-05-31)
+## `agents-cli eval run` — Evaluation Criteria
 
-Initially skipped for the Track 1 hackathon submission due to `agents-cli 0.1.3 → 0.2.1` version mismatch risk. After completing the scaffold upgrade (`agents-cli scaffold upgrade` → `agents-cli-manifest.yaml`), the eval suite runs cleanly:
+The eval suite runs against `tests/eval/evalsets/drift_trajectories.evalset.json`:
 
 - `eval_config.json` criterion changed from list → dict (ADK 1.15+ requirement); `response_match_score` dropped (no `final_response` in cases; ROUGE would score 0.0 against empty string); `tool_trajectory_avg_score=1.0` is the correct signal for a HITL agent.
 - MCP-dependent cases excluded — MCP tools require live Fivetran API + subprocess spawn that exceeds the 10s eval session timeout. MCP tool behavior is validated in the playground instead.
@@ -283,7 +283,6 @@ structurally valid response even when the LLM fails.
 
 ---
 
-## `agents-cli scaffold upgrade` Notes (2026-05-31)
+## Repository Hygiene
 
-- `agents-cli scaffold upgrade` partially succeeded — manifest migrated but template comparison failed with "Project name exceeds 26 characters". Functional result is correct; the 26-char limit only affects the cosmetic diff-generation step.
 - `app/.adk/` added to `.gitignore` — runtime artifacts (timestamped eval JSONs + `session.db`).
